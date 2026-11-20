@@ -1,6 +1,6 @@
 // The search: coarse grid -> finer grid -> places to eat -> time every trip -> rank.
-import { candidateGrid, centroid, gridAround, haversine, rankSpots, summarise, budgetBand, vibeOf, isVegFriendly } from "./fair.js";
-import { travelMatrix, placesNear, reverseGeocode } from "./services.js";
+import { candidateGrid, centroid, gridAround, haversine, rankSpots, summarise, budgetBand, vibeOf, isVegFriendly } from "./fair.js?v=5";
+import { travelMatrix, placesNear, reverseGeocode } from "./services.js?v=5";
 
 export const STEPS = [
   "Testing 49 possible meeting points",
@@ -14,8 +14,8 @@ export async function findFairSpot(friends, filters, onStep = () => {}, signal) 
   const mid = centroid(friends);
 
   // 1 · coarse grid over the whole squad, plus the plain midpoint for comparison
-  onStep(0);
   const coarse = candidateGrid(friends, 7);
+  onStep(0, { grid: coarse });
   const m1 = await travelMatrix(friends, [...coarse, mid], signal);
   estimated ||= m1.estimated;
   const midTimes = m1.matrix.map((row) => row[coarse.length]);
@@ -23,9 +23,9 @@ export async function findFairSpot(friends, filters, onStep = () => {}, signal) 
   if (!rankedCoarse.length) throw new Error("NO_ROUTES");
 
   // 2 · finer grid around the best coarse point (half a cell either side)
-  onStep(1);
   const cell = haversine(coarse[0], coarse[1]) || 800;
   const fine = gridAround(rankedCoarse[0], Math.max(cell * 0.6, 400), 5);
+  onStep(1, { grid: fine });
   const m2 = await travelMatrix(friends, fine, signal);
   estimated ||= m2.estimated;
   const rankedFine = rankSpots(fine, m2.matrix);
@@ -33,9 +33,16 @@ export async function findFairSpot(friends, filters, onStep = () => {}, signal) 
 
   // 3 · places to eat near the spot, widening the circle if the area is quiet
   onStep(2);
-  // 1.5 km is plenty in a busy area; only a quiet area needs a second, wider request
-  let places = await placesNear(spot, 1500, signal);
-  if (filterPlaces(places, filters, spot).length < 8) places = await placesNear(spot, 4500, signal);
+  // 1.5 km is plenty in a busy area; only a quiet area needs a second, wider request.
+  // If every places server is down, the fair spot is still shown, just without restaurants.
+  let places = [], placesDown = false;
+  try {
+    places = await placesNear(spot, 1500, signal);
+    if (filterPlaces(places, filters, spot).length < 8) places = await placesNear(spot, 4500, signal);
+  } catch (e) {
+    if (e.name === "AbortError") throw e;
+    placesDown = true;
+  }
   let picked = filterPlaces(places, filters, spot);
   let relaxed = false;
   if (picked.length < 4 && places.length) {           // filters too strict here: keep their order, relax them
@@ -66,7 +73,7 @@ export async function findFairSpot(friends, filters, onStep = () => {}, signal) 
     spot: { lat: spot.lat, lon: spot.lon, name: where.name, area: where.area, times: spot.times.map((t) => Math.round(t)),
             ...pick(summarise(spot.times), ["max", "min", "mean", "balance"]) },
     midpoint: { lat: mid.lat, lon: mid.lon, times: midTimes.map((t) => (t == null ? null : Math.round(t))) },
-    venues, estimated, relaxed, foundAt: Date.now(),
+    venues, estimated, relaxed, placesDown, foundAt: Date.now(),
   };
 }
 

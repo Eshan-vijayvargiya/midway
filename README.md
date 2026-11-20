@@ -10,6 +10,7 @@ Four friends live in four corners of the same city, at different colleges, and n
 
 - **Add the squad.** Each friend types an area, college or metro station (search as you type), uses their phone's location, or drops a pin on the map. Up to 8 friends, each travelling by road (bike, auto or cab) or on foot.
 - **Get the fair spot.** Midway times real road trips from every friend to about 75 possible meeting points and picks the one where the **longest ride is as short as possible**. It also shows how unfair the plain map midpoint would have been.
+- **Watch it work.** While it searches, a scanner hops from friend to friend and the points being tested light up on the map. When it's done, each friend's road route grows towards the spot, and every friend gets **Show route** and **Directions** (Google Maps) buttons.
 - **See places to eat around it.** Cafés, quick bites, sit-down places and dessert from OpenStreetMap, filtered by vibe, veg-friendly and budget.
 - **Swipe to vote.** Tinder-style cards show each friend's travel time to each place. The squad's favourites rise to the top, and each friend gets a Google Maps route button.
 - **One link for the whole squad.** Share it on WhatsApp. In a live room, everyone adds their own spot from their own phone and votes update live. Spots are rounded to about 100 m before they are shared.
@@ -35,9 +36,9 @@ The maths lives in [`js/fair.js`](js/fair.js): Weiszfeld's geometric median, the
 | Part | Tool | Cost |
 |---|---|---|
 | Page | Plain HTML, CSS and JavaScript modules (no build step) | Free |
-| Map | Leaflet 1.9.4 + OpenStreetMap tiles, turned dark with a CSS filter | Free, no key |
+| Map | Leaflet 1.9.4 + OpenStreetMap tiles, made clean white with a CSS filter | Free, no key |
 | Place search | Photon (by komoot), built on OpenStreetMap | Free, no key |
-| Travel times | OSRM table service (FOSSGIS servers, then the OSRM demo server) | Free, no key |
+| Travel times and routes | OSRM table and route services (FOSSGIS servers, then the OSRM demo server) | Free, no key |
 | Places to eat | OpenStreetMap via the Overpass API | Free, no key |
 | Live rooms (optional) | Google Firebase Cloud Firestore | Free plan |
 | Hosting | GitHub Pages | Free |

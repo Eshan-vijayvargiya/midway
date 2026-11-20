@@ -1,10 +1,10 @@
 // Midway: the screen logic. State lives here; fair.js does the maths, finder.js runs the search.
-import { MAX_FRIENDS, SERVICES } from "./config.js";
-import { findFairSpot, STEPS } from "./finder.js";
-import { searchPlaces, reverseGeocode } from "./services.js";
-import { makeDeck } from "./swipe.js";
-import { DEMO_FRIENDS } from "./demo.js";
-import * as room from "./room.js";
+import { MAX_FRIENDS, SERVICES } from "./config.js?v=5";
+import { findFairSpot, STEPS } from "./finder.js?v=5";
+import { searchPlaces, reverseGeocode, routeLine } from "./services.js?v=5";
+import { makeDeck } from "./swipe.js?v=5";
+import { DEMO_FRIENDS } from "./demo.js?v=5";
+import * as room from "./room.js?v=5";
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -25,6 +25,7 @@ const state = {
   votes: {},                // venueId -> { friendId: 1 | -1 }
   stale: false,
   pinFor: null,             // friend whose spot is being dropped on the map
+  running: false,           // a search is in progress: the squad and vibe are locked
 };
 const LOCAL_VOTER = "you";
 
@@ -109,6 +110,7 @@ function friendCard(f, i) {
   }));
   $(".gps", li).addEventListener("click", () => useMyLocation(f, li));
   wireSearch(f, li);
+  if (state.running) $$("input, button", li).forEach((el) => { el.disabled = true; });   // a live update arrived mid-search
   return li;
 }
 
@@ -190,6 +192,8 @@ function useMyLocation(f, li) {
 function updateFindButton() {
   const n = located().length;
   const btn = $("#findBtn");
+  btn.classList.toggle("btn-stop", state.running);
+  if (state.running) { btn.disabled = false; btn.textContent = "Stop"; return; }
   btn.disabled = n < 2;
   btn.textContent = state.result && state.stale ? "Find again with the new spots" : "Find our fair spot";
   $("#squadHint").textContent = n < 2 ? `Add at least 2 spots (${n} so far)` : `${n} spots added`;
@@ -226,17 +230,19 @@ function filtersChanged() {
 }
 
 /* ---------------- map ---------------- */
-let map, layer;
+let map, layer, routeLayer;
+const calm = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
 function initMap() {
   map = L.map("map", { zoomControl: true, attributionControl: true }).setView([22.6, 78.9], 5);
   L.tileLayer(SERVICES.tiles, {
-    maxZoom: 19, subdomains: "abcd",
-    attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, © <a href="https://carto.com/attributions">CARTO</a>',
+    maxZoom: 19,
+    attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
   }).addTo(map);
+  routeLayer = L.layerGroup().addTo(map);
   layer = L.layerGroup().addTo(map);
   map.on("click", async (e) => {
     const f = friendById(state.pinFor);
-    if (!f) return;
+    if (!f || state.running) return;
     state.pinFor = null;
     $("#map").classList.remove("pinning");
     Object.assign(f, { lat: e.latlng.lat, lon: e.latlng.lng, place: "Pinned spot" });
@@ -270,10 +276,8 @@ function drawMap(pickId) {
   if (!map) return;
   layer.clearLayers();
   const r = state.result && !state.stale ? state.result : null;
+  if (!r) routeLayer?.clearLayers();
   if (r) {
-    located().forEach((f) => {
-      L.polyline([[f.lat, f.lon], [r.spot.lat, r.spot.lon]], { color: f.color, weight: 3, opacity: 0.85, dashArray: "2 9", lineCap: "round" }).addTo(layer);
-    });
     r.venues.forEach((v) => {
       const icon = L.divIcon({ className: "", html: `<div class="m-place${v.id === pickId ? " pick" : ""}"></div>`, iconSize: [22, 22], iconAnchor: [11, 11] });
       L.marker([v.lat, v.lon], { icon, keyboard: false }).addTo(layer)
@@ -290,29 +294,162 @@ function drawMap(pickId) {
   });
 }
 
+/* ---------------- scanning animation (while searching) ---------------- */
+// A beam travels from friend to friend while the candidate points Midway is testing light up.
+let scan = null;
+function startScan(friends) {
+  stopScan();
+  const g = L.layerGroup().addTo(map);
+  const dots = L.layerGroup().addTo(g);
+  const pts = friends.map((f) => L.latLng(f.lat, f.lon));
+  const path = [...pts, pts[0]];
+  const head = L.marker(pts[0], { interactive: false, keyboard: false,
+    icon: L.divIcon({ className: "", html: `<div class="m-scan"></div>`, iconSize: [28, 28], iconAnchor: [14, 14] }) }).addTo(g);
+  const trail = L.polyline([], { color: "#08080c", weight: 3, opacity: 0.7, dashArray: "1 7", lineCap: "round", interactive: false }).addTo(g);
+  let seg = 0, t = 0, last = performance.now(), raf = 0, tail = [];
+  const pulse = (ll, color) => {
+    const m = L.marker(ll, { interactive: false, keyboard: false,
+      icon: L.divIcon({ className: "", html: `<div class="m-pulse" style="--friend:${color}"></div>`, iconSize: [90, 90], iconAnchor: [45, 45] }) }).addTo(g);
+    setTimeout(() => g.removeLayer(m), 1100);
+  };
+  const frame = (now) => {
+    t += (now - last) / 850; last = now;
+    while (t >= 1) {
+      t -= 1;
+      seg = (seg + 1) % (path.length - 1);
+      pulse(path[seg], friends[seg].color);
+    }
+    const a = path[seg], b = path[seg + 1];
+    const p = L.latLng(a.lat + (b.lat - a.lat) * t, a.lng + (b.lng - a.lng) * t);
+    head.setLatLng(p);
+    tail.push(p); if (tail.length > 70) tail.shift();
+    trail.setLatLngs(tail);
+    raf = requestAnimationFrame(frame);
+  };
+  if (!calm()) { pulse(pts[0], friends[0].color); raf = requestAnimationFrame(frame); }
+  scan = { g, dots, stop: () => cancelAnimationFrame(raf) };
+}
+
+function showCandidates(points, round) {
+  if (!scan) return;
+  if (round > 0) scan.dots.clearLayers();
+  points.forEach((pt, i) => {
+    L.marker([pt.lat, pt.lon], { interactive: false, keyboard: false,
+      icon: L.divIcon({ className: "", html: `<div class="m-cand${round ? " fine" : ""}" style="animation-delay:${Math.round(i * (calm() ? 0 : 900 / points.length))}ms"></div>`,
+                        iconSize: [10, 10], iconAnchor: [5, 5] }) }).addTo(scan.dots);
+  });
+}
+
+function stopScan() {
+  if (!scan) return;
+  scan.stop();
+  map.removeLayer(scan.g);
+  scan = null;
+}
+
+/* ---------------- each friend's road route to the spot ---------------- */
+let routes = [];          // per friend in result order: { line, minutes, km, layers }
+let routeToken = 0;
+async function drawRoutes() {
+  const r = state.result;
+  routeLayer.clearLayers();
+  routes = [];
+  if (!r || state.stale) return;
+  const mine = ++routeToken;
+  const fr = resultFriends();
+  const found = await Promise.all(fr.map((f) => f.lat == null ? null
+    : routeLine(f, r.spot, f.mode).catch(() => null)));
+  if (mine !== routeToken) return;                       // a newer search started meanwhile
+  fr.forEach((f, i) => {
+    if (f.lat == null) return;
+    const line = found[i]?.line || [[f.lat, f.lon], [r.spot.lat, r.spot.lon]];
+    const casing = L.polyline([], { color: "#08080c", weight: 8, opacity: 0.55, lineCap: "round", lineJoin: "round", interactive: false }).addTo(routeLayer);
+    const stroke = L.polyline([], { color: f.color, weight: 4.5, opacity: 1, lineCap: "round", lineJoin: "round",
+                                    dashArray: found[i] ? null : "2 9" }).addTo(routeLayer);
+    stroke.bindTooltip(`${esc(displayName(f, i))}: ${r.spot.times[i]} min`, { className: "tip", sticky: true });
+    routes[i] = { line, layers: [casing, stroke], real: Boolean(found[i]) };
+    grow([casing, stroke], line, calm() ? 0 : 1300);
+  });
+}
+
+// draw a line bit by bit, so the routes "arrive" at the spot together
+function grow(lines, pts, ms) {
+  if (!ms) { lines.forEach((l) => l.setLatLngs(pts)); return; }
+  const t0 = performance.now();
+  const step = (now) => {
+    const k = Math.min(1, (now - t0) / ms);
+    const n = Math.max(2, Math.ceil(pts.length * k));
+    lines.forEach((l) => l.setLatLngs(pts.slice(0, n)));
+    if (k < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
+let focused = -1;
+function focusRoute(i) {
+  focused = focused === i ? -1 : i;
+  routes.forEach((rt, k) => {
+    if (!rt) return;
+    const on = focused === -1 || focused === k;
+    rt.layers[1].setStyle({ opacity: on ? 1 : 0.18, weight: focused === k ? 6.5 : 4.5 });
+    rt.layers[0].setStyle({ opacity: on ? 0.55 : 0.08, weight: focused === k ? 11 : 8 });
+  });
+  $$("#rideBars .show-route").forEach((b) => b.setAttribute("aria-pressed", String(Number(b.dataset.i) === focused)));
+  if (focused >= 0 && routes[focused]) {
+    routes[focused].layers[1].bringToFront();
+    map.fitBounds(L.latLngBounds(routes[focused].line), { padding: [60, 60], maxZoom: 15 });
+    if (matchMedia("(max-width: 900px)").matches) $("#map").scrollIntoView({ behavior: calm() ? "auto" : "smooth", block: "center" });
+  } else fitAll();
+}
+
 /* ---------------- the search ---------------- */
+let searchCtl;
+// While Midway searches, the squad and vibe are locked (no half-changed results). Stop unlocks them.
+function setRunning(on) {
+  state.running = on;
+  for (const id of ["stepSquad", "stepVibe"]) {
+    const sec = $(`#${id}`);
+    sec.inert = on;                                           // no focus, clicks or typing inside
+    sec.classList.toggle("locked", on);
+    $$("input, button", sec).forEach((el) => { el.disabled = on; });
+  }
+  updateFindButton();
+}
+
 async function runSearch() {
+  if (state.running) { searchCtl?.abort(); return; }          // the button says "Stop" while running
   const friends = located();
   if (friends.length < 2) return;
   const box = $("#stepResults"), prog = $("#progress");
   box.hidden = false; $("#resultBody").hidden = true; prog.hidden = false;
-  prog.innerHTML = STEPS.map((s) => `<p>${esc(s)}</p>`).join("");
-  $("#findBtn").disabled = true;
+  prog.innerHTML = STEPS.map((s) => `<p>${esc(s)}</p>`).join("")
+    + `<small class="lock-note">Your squad is locked while Midway searches. Press Stop to change something.</small>`;
+  searchCtl = new AbortController();
+  setRunning(true);
   box.scrollIntoView({ behavior: "smooth", block: "start" });
-  const step = (k) => $$("p", prog).forEach((p, i) => { p.className = i < k ? "done" : i === k ? "now" : ""; });
+  const step = (k, info) => {
+    $$("p", prog).forEach((p, i) => { p.className = i < k ? "done" : i === k ? "now" : ""; });
+    if (info?.grid) showCandidates(info.grid, k);
+  };
+  routeLayer.clearLayers();
+  startScan(friends);
+  fitAll();
   try {
-    const result = await findFairSpot(friends, state.filters, step);
+    const result = await findFairSpot(friends, state.filters, step, searchCtl.signal);
     result.friendIds = friends.map((f) => f.id);
     state.result = result; state.stale = false; state.votes = {};
     if (state.mode === "live") await room.saveResult(state.code, result);
     else store.set("midway.result", result);
     showResults();
   } catch (e) {
-    prog.innerHTML = `<p class="now">${e.message === "NO_ROUTES"
-      ? "No road route connects these spots. Check that everyone is in the same city."
-      : "The free map servers didn't answer in time. Wait a few seconds and press the button again."}</p>`;
+    const msg = e.name === "AbortError" ? "Stopped. Make your changes, then press “Find our fair spot” again."
+      : e.message === "NO_ROUTES" ? "No road route connects these spots. Check that everyone is in the same city."
+      : e.message === "PLACES_DOWN" ? "The fair spot is ready, but the free places server is busy. Press the button again in a minute."
+      : "The free map servers didn't answer in time. Wait a few seconds and press the button again.";
+    prog.innerHTML = `<p class="now">${msg}</p>` + (e.name === "AbortError" ? "" : `<small class="lock-note">Details for the developer: ${esc(e.message || e.name)}</small>`);
   } finally {
-    updateFindButton();
+    stopScan();
+    setRunning(false);
   }
 }
 
@@ -327,6 +464,8 @@ function showResults() {
   renderBoard();
   drawMap();
   fitAll();
+  focused = -1;
+  drawRoutes();
   requestAnimationFrame(() => $("#stepResults").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" }));
 }
 function renderResultsIfAny() { if (state.result && !$("#resultBody").hidden) { renderSpot(); renderBoard(); } }
@@ -352,11 +491,17 @@ function renderSpot() {
   const barMax = Math.max(maxT, ...(midMax ? [midMax] : []));
   $("#rideBars").innerHTML = fr.map((f, i) => `
     <li style="--friend:${f.color}"><span>${esc(f.emoji)}</span><span class="who">${esc(displayName(f, i))}</span>
-      <span class="bar"><span style="width:${(100 * r.spot.times[i]) / barMax}%"></span></span><span class="min">${r.spot.times[i]} min</span></li>`).join("");
+      <span class="bar"><span style="width:${(100 * r.spot.times[i]) / barMax}%"></span></span><span class="min">${r.spot.times[i]} min</span>
+      ${f.lat == null ? "" : `<span class="ride-actions">
+        <button type="button" class="pill show-route" data-i="${i}" aria-pressed="false">Show route</button>
+        <a class="pill" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&origin=${f.lat},${f.lon}&destination=${r.spot.lat},${r.spot.lon}&travelmode=${f.mode === "foot" ? "walking" : "driving"}" aria-label="Directions for ${esc(displayName(f, i))} in Google Maps">Directions</a>
+      </span>`}</li>`).join("");
+  $$("#rideBars .show-route").forEach((b) => b.addEventListener("click", () => focusRoute(Number(b.dataset.i))));
   $("#routeNote").textContent = (r.estimated
     ? "The free routing servers were busy, so these are estimates from distance. "
     : "Road travel times from OpenStreetMap, without traffic. Add 30–50% at rush hour. ")
-    + (r.relaxed ? "Few places matched every filter here, so some filters were relaxed." : "");
+    + (r.relaxed ? "Few places matched every filter here, so some filters were relaxed. " : "")
+    + (r.placesDown ? "The free places server is busy, so restaurants couldn't load this time. Press the button again in a minute." : "");
   $("#deckHint").textContent = r.venues.length ? `${r.venues.length} places near the spot` : "";
 }
 

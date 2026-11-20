@@ -96,7 +96,7 @@ h1, h2 { margin: 0; }
 .planner { display: grid; grid-template-columns: minmax(360px, 440px) 1fr; height: calc(100dvh - 59px); }
 .panel { background: var(--night); border-right: 1px solid var(--rule); overflow-y: auto; padding: 20px 20px 40px; display: flex; flex-direction: column; gap: 26px; }
 .map-wrap { position: relative; }
-#map { position: absolute; inset: 0; background: #0e0e14; }
+#map { position: absolute; inset: 0; background: #ecebe7; }
 .step-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
 .step-head h2 { font: 600 18px/1.2 var(--display); letter-spacing: -.01em; }
 .hint { color: var(--dim); font-size: 14px; }
@@ -179,6 +179,11 @@ h1, h2 { margin: 0; }
 .ride-bars .bar { height: 10px; border-radius: 999px; background: var(--asphalt); overflow: hidden; }
 .ride-bars .bar span { display: block; height: 100%; border-radius: 999px; background: var(--friend); transform-origin: left; animation: grow .8s var(--ease) both; }
 .ride-bars .min { text-align: right; font-weight: 700; }
+.ride-actions { grid-column: 2 / -1; display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 6px; }
+.pill { display: inline-flex; align-items: center; background: var(--asphalt); border: 1px solid var(--rule); color: var(--chalk);
+  border-radius: 999px; padding: 6px 11px; font-size: 13px; text-decoration: none; cursor: pointer; }
+.pill:hover { border-color: var(--friend); }
+.pill[aria-pressed="true"] { border-color: var(--friend); background: color-mix(in srgb, var(--friend) 18%, var(--asphalt)); }
 @keyframes grow { from { transform: scaleX(0); } }
 
 /* swipe deck */
@@ -222,9 +227,10 @@ h1, h2 { margin: 0; }
 .board-list .go a { font-size: 13px; padding: 6px 10px; border-radius: 10px; background: var(--asphalt); text-decoration: none; color: var(--chalk); box-shadow: inset 3px 0 0 var(--friend); }
 
 /* map markers */
-.leaflet-container { font: inherit; background: #0e0e14; }
-/* OpenStreetMap's light tiles, turned into a night map (markers and routes sit in other panes, so they keep their colours) */
-.leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(.95) contrast(.9) saturate(.45); }
+.leaflet-container { font: inherit; background: #ecebe7; }
+/* a clean white map: OpenStreetMap tiles with the colour taken out, so the neon routes and stickers stand out
+   (markers and routes sit in other panes, so the filter doesn't touch them) */
+.leaflet-tile-pane { filter: grayscale(1) brightness(1.06) contrast(.9); }
 #map.pinning, #map.pinning .leaflet-container { cursor: crosshair; }
 #map.pinning { box-shadow: inset 0 0 0 3px var(--lime); }
 .leaflet-control-attribution { background: rgba(8, 8, 12, .8) !important; color: #8e8aa8 !important; font-size: 11px; }
@@ -232,7 +238,22 @@ h1, h2 { margin: 0; }
 .leaflet-bar a { background: var(--slab) !important; color: var(--chalk) !important; border-color: var(--rule) !important; }
 .m-friend { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; font-size: 24px; background: var(--asphalt);
   box-shadow: 0 0 0 3px var(--friend), 0 8px 20px rgba(0, 0, 0, .7); }
-.m-spot { width: 30px; height: 30px; border-radius: 50%; background: var(--lime); box-shadow: 0 0 0 8px rgba(200, 255, 61, .2), 0 0 40px 10px rgba(200, 255, 61, .45); }
+.m-spot { width: 30px; height: 30px; border-radius: 50%; background: var(--lime);
+  box-shadow: 0 0 0 3px #08080c, 0 0 0 10px rgba(200, 255, 61, .45), 0 0 40px 14px rgba(200, 255, 61, .55); }
+
+/* scanning: a beam hops friend to friend, the points being tested pop up, each friend pulses as it is reached */
+.m-scan { position: relative; width: 28px; height: 28px; border-radius: 50%; background: var(--lime);
+  box-shadow: 0 0 0 3px #08080c, 0 0 26px 10px rgba(200, 255, 61, .75); }
+.m-scan::after { content: ""; position: absolute; left: 50%; top: 50%; width: 150px; height: 150px; margin: -75px 0 0 -75px; border-radius: 50%;
+  background: conic-gradient(from 0deg, rgba(200, 255, 61, .55), rgba(200, 255, 61, 0) 28%, transparent);
+  animation: sweep 1.1s linear infinite; pointer-events: none; }
+.m-pulse { width: 90px; height: 90px; border-radius: 50%; border: 4px solid var(--friend); animation: ring 1s ease-out forwards; }
+.m-cand { width: 10px; height: 10px; border-radius: 50%; background: #08080c; box-shadow: 0 0 0 2px var(--lime);
+  opacity: 0; transform: scale(.2); animation: dot .35s var(--ease) forwards; }
+.m-cand.fine { box-shadow: 0 0 0 2px var(--pink); }
+@keyframes sweep { to { transform: rotate(360deg); } }
+@keyframes ring { from { transform: scale(.2); opacity: 1; } to { transform: scale(1); opacity: 0; } }
+@keyframes dot { to { opacity: .9; transform: scale(1); } }
 .m-place { width: 14px; height: 14px; border-radius: 50%; background: var(--pink); box-shadow: 0 0 0 3px var(--asphalt), 0 0 14px rgba(255, 79, 184, .8); }
 .m-place.pick { width: 22px; height: 22px; background: var(--chalk); box-shadow: 0 0 0 4px var(--pink), 0 0 24px var(--pink); }
 .leaflet-tooltip.tip { background: var(--slab); color: var(--chalk); border: 1px solid var(--rule); border-radius: 10px; box-shadow: none; font-size: 13px; }

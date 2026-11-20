@@ -1,7 +1,7 @@
 // Talking to the outside world: place search, travel times and places to eat.
 // Every call has a fallback, so a slow or busy free server never leaves the app stuck.
-import { SERVICES } from "./config.js";
-import { haversine } from "./fair.js";
+import { SERVICES } from "./config.js?v=5";
+import { haversine } from "./fair.js?v=5";
 
 // signal = the person's Stop button; timeoutMs = give up on one slow server and try the next
 async function getJSON(url, opts = {}, timeoutMs = 15000, signal) {
@@ -101,25 +101,45 @@ export async function travelMatrix(friends, dests, signal) {
 }
 
 // Named places to eat within radiusM metres of a point (OpenStreetMap via Overpass).
+// Public Overpass servers are often busy, so two are asked at once and the first good answer wins.
 export async function placesNear(pt, radiusM, signal) {
   const q = `[out:json][timeout:15];
 nwr(around:${Math.round(radiusM)},${pt.lat.toFixed(5)},${pt.lon.toFixed(5)})["amenity"~"^(restaurant|cafe|fast_food|ice_cream|food_court)$"]["name"];
 out center tags 400;`;
-  let lastErr;
-  for (const base of SERVICES.places) {
+  const ask = async (base) => {
+    const data = await getJSON(base, { method: "POST", body: new URLSearchParams({ data: q }) }, 20000, signal);
+    if (!Array.isArray(data.elements)) throw new Error("bad answer");
+    return data.elements;
+  };
+  let elements = null;
+  for (let i = 0; i < SERVICES.places.length && !elements; i += 2) {
     try {
-      const data = await getJSON(base, { method: "POST", body: new URLSearchParams({ data: q }) }, 18000, signal);
-      return (data.elements || []).map((e) => ({
-        id: `${e.type}/${e.id}`,
-        name: e.tags.name,
-        lat: e.lat ?? e.center?.lat,
-        lon: e.lon ?? e.center?.lon,
-        tags: e.tags,
-      })).filter((p) => p.lat != null);
-    } catch (e) {
-      if (stopped(e)) throw e;
-      lastErr = e;
+      elements = await Promise.any(SERVICES.places.slice(i, i + 2).map(ask));
+    } catch {
+      if (signal?.aborted) throw new DOMException("Stopped", "AbortError");
     }
   }
-  throw lastErr || new Error("PLACES_DOWN");
+  if (!elements) throw new Error("PLACES_DOWN");
+  return elements.map((e) => ({
+    id: `${e.type}/${e.id}`,
+    name: e.tags.name,
+    lat: e.lat ?? e.center?.lat,
+    lon: e.lon ?? e.center?.lon,
+    tags: e.tags,
+  })).filter((p) => p.lat != null);
+}
+
+// The road route from one friend to the spot, as [lat, lon] points for the map (null if no server answers).
+export async function routeLine(from, to, mode = "car", signal) {
+  const coords = `${from.lon.toFixed(5)},${from.lat.toFixed(5)};${to.lon.toFixed(5)},${to.lat.toFixed(5)}`;
+  for (const base of SERVICES.routing[mode === "foot" ? "foot" : "car"]) {
+    try {
+      const d = await getJSON(`${base}/route/v1/driving/${coords}?overview=full&geometries=geojson`, {}, 12000, signal);
+      const r = d.code === "Ok" && d.routes?.[0];
+      if (r) return { line: r.geometry.coordinates.map(([lo, la]) => [la, lo]), minutes: r.duration / 60, km: r.distance / 1000 };
+    } catch (e) {
+      if (stopped(e)) throw e;
+    }
+  }
+  return null;
 }

@@ -12,7 +12,12 @@ export const SERVICES = {
     car: ["https://routing.openstreetmap.de/routed-car", "https://router.project-osrm.org"],
     foot: ["https://routing.openstreetmap.de/routed-foot"],
   },
-  places: ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter"],
+  places: [                                                   // asked two at a time; the first good answer wins
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.private.coffee/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+  ],
   tiles: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",    // light OSM tiles, turned dark with a CSS filter
 };
 
