@@ -238,18 +238,41 @@ h1, h2 { margin: 0; }
 
 /* swipe deck */
 .deck-wrap { margin-top: 4px; }
-.deck { position: relative; height: 330px; outline: none; }
-.card { position: absolute; inset: 0; background: var(--slab); border: 1px solid var(--rule); border-radius: 24px; padding: 20px;
-  display: flex; flex-direction: column; gap: 10px; touch-action: pan-y; user-select: none; cursor: grab; will-change: transform; }
+.deck { position: relative; height: 430px; outline: none; }
+.card { position: absolute; inset: 0; background: var(--slab); border: 1px solid var(--rule); border-radius: 24px; overflow: hidden;
+  display: flex; flex-direction: column; touch-action: pan-y; user-select: none; cursor: grab; will-change: transform; }
 .card:not(:first-child) { pointer-events: none; }
 .card.dragging { cursor: grabbing; transition: none; }
-.card .vibe { font-size: 38px; line-height: 1; }
+/* the photo takes whatever height the text leaves, so a long name or many friends still fit */
+.card-top { position: relative; flex: 1 1 auto; min-height: 120px; display: flex; }
+.card-body { flex: none; display: flex; flex-direction: column; gap: 9px; padding: 14px 18px 18px; }
 .card h3 { margin: 0; font: 600 21px/1.15 var(--display); letter-spacing: -.02em; }
 .card .meta { color: var(--dim); font-size: 14px; margin: 0; }
+.gm { position: absolute; top: 12px; right: 12px; z-index: 2; font-size: 13px; font-weight: 700; color: var(--chalk); text-decoration: none;
+  padding: 7px 11px; border-radius: 999px; background: rgba(8, 8, 12, .72); border: 1px solid rgba(244, 242, 255, .18); }
+.gm:hover { border-color: var(--lime); }
+
+/* photo strip: a real photo with its credit, or an illustration in the vibe's colour */
+.ph { position: relative; flex: 1; width: 100%; min-height: 110px; overflow: hidden; background: var(--asphalt); }
+.ph img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+.ph::after { content: ""; position: absolute; inset: auto 0 0; height: 58%; pointer-events: none;
+  background: linear-gradient(to top, rgba(8, 8, 12, .88), rgba(8, 8, 12, 0)); }
+.ph .credit { position: absolute; left: 12px; right: 12px; bottom: 8px; z-index: 1; margin: 0; font-size: 11.5px; line-height: 1.3;
+  color: rgba(244, 242, 255, .78); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ph .credit b { color: var(--chalk); font-weight: 700; }
+.ph .credit a { color: inherit; text-decoration: underline; text-decoration-color: rgba(244, 242, 255, .35); text-underline-offset: 2px; }
+.ph .art-emoji { display: none; }
+.ph.art { display: grid; place-items: center;
+  background: radial-gradient(120% 90% at 20% 15%, color-mix(in srgb, var(--tint) 55%, transparent), transparent 62%),
+              radial-gradient(90% 80% at 90% 100%, color-mix(in srgb, var(--tint) 30%, transparent), transparent 70%), var(--asphalt); }
+.ph.art::after, .ph.art img, .ph.art .credit { display: none; }
+.ph.art .art-emoji { display: block; font-size: 64px; line-height: 1; filter: drop-shadow(0 10px 24px rgba(0, 0, 0, .55)); }
+.ph.loading .art-emoji { animation: bob 1.4s var(--ease) infinite alternate; }
+@keyframes bob { to { transform: translateY(-6px) scale(1.04); } }
 .card .tags { display: flex; flex-wrap: wrap; gap: 6px; }
 .card .tag { font-size: 13px; padding: 4px 9px; border-radius: 999px; background: var(--asphalt); border: 1px solid var(--rule); }
 .card .tag.veg { border-color: var(--mint); color: var(--mint); }
-.card .mini { margin-top: auto; display: flex; gap: 6px; flex-wrap: wrap; }
+.card .mini { margin-top: 3px; display: flex; gap: 6px; flex-wrap: wrap; }
 .card .mini span { font-size: 13px; padding: 5px 8px; border-radius: 10px; background: var(--asphalt); box-shadow: inset 3px 0 0 var(--friend); }
 .stamp { position: absolute; top: 22px; font: 800 26px/1 var(--display); padding: 6px 12px; border-radius: 12px; border: 3px solid; opacity: 0; rotate: -12deg; }
 .stamp.in { right: 20px; color: var(--pink); }
@@ -274,7 +297,20 @@ h1, h2 { margin: 0; }
 .board-list .votes { display: flex; gap: 2px; font-size: 18px; }
 .board-list .go { grid-column: 1 / -1; display: none; flex-wrap: wrap; gap: 6px; padding-top: 4px; }
 .board-list li.open .go { display: flex; }
-.board-list .go a { font-size: 13px; padding: 6px 10px; border-radius: 10px; background: var(--asphalt); text-decoration: none; color: var(--chalk); box-shadow: inset 3px 0 0 var(--friend); }
+.route-link { font-size: 13px; padding: 6px 10px; border-radius: 10px; background: var(--asphalt); text-decoration: none; color: var(--chalk); box-shadow: inset 3px 0 0 var(--friend); }
+.board-list .lock-it { border-color: var(--lime); color: var(--lime); font-weight: 700; }
+.board-list li.locked { border-color: var(--lime); box-shadow: 0 0 30px -14px var(--lime); }
+.board-list li.locked .rank { color: var(--lime); }
+#lockBtn { margin-top: 10px; }
+
+/* the place the squad locked in */
+.picked { margin-top: 14px; border-radius: 22px; overflow: hidden; background: var(--slab); border: 1px solid var(--lime);
+  box-shadow: 0 0 60px -28px rgba(200, 255, 61, .7); scroll-margin-top: 76px; }
+.picked .ph { height: 150px; flex: none; }
+.picked-body { padding: 14px 18px 18px; display: flex; flex-direction: column; gap: 10px; }
+.picked-name { font: 800 clamp(22px, 2.6vw, 26px)/1.1 var(--display); letter-spacing: -.03em; }
+.picked .meta { margin: 0; color: var(--dim); font-size: 14px; }
+.picked .go, .picked-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 
 /* map markers */
 .leaflet-container { font: inherit; background: #ecebe7; }
@@ -306,6 +342,8 @@ h1, h2 { margin: 0; }
 @keyframes dot { to { opacity: .9; transform: scale(1); } }
 .m-place { width: 14px; height: 14px; border-radius: 50%; background: var(--pink); box-shadow: 0 0 0 3px var(--asphalt), 0 0 14px rgba(255, 79, 184, .8); }
 .m-place.pick { width: 22px; height: 22px; background: var(--chalk); box-shadow: 0 0 0 4px var(--pink), 0 0 24px var(--pink); }
+.m-place.locked { width: 30px; height: 30px; display: grid; place-items: center; background: var(--lime); color: #0b0f00; font-size: 16px; line-height: 1;
+  box-shadow: 0 0 0 3px #08080c, 0 0 0 7px rgba(200, 255, 61, .4), 0 0 30px 8px rgba(200, 255, 61, .6); }
 .leaflet-tooltip.tip { background: var(--slab); color: var(--chalk); border: 1px solid var(--rule); border-radius: 10px; box-shadow: none; font-size: 13px; }
 .leaflet-tooltip.tip::before { display: none; }
 

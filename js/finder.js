@@ -1,6 +1,6 @@
 // The search: coarse grid -> finer grid -> places to eat -> time every trip -> rank.
-import { candidateGrid, centroid, gridAround, haversine, rankSpots, summarise, estCost, vibeOf, isVegFriendly } from "./fair.js?v=7";
-import { travelMatrix, placesNear, reverseGeocode } from "./services.js?v=7";
+import { candidateGrid, centroid, gridAround, haversine, rankSpots, summarise, estCost, vibeOf, isVegFriendly } from "./fair.js?v=8";
+import { travelMatrix, placesNear, reverseGeocode } from "./services.js?v=8";
 
 export const STEPS = [
   "Testing 49 possible meeting points",
@@ -64,6 +64,7 @@ export async function findFairSpot(friends, filters, onStep = () => {}, signal) 
       cuisine: (v.tags.cuisine || "").split(";").filter(Boolean).slice(0, 2).map((c) => c.replace(/_/g, " ")),
       times: v.times.map((t) => Math.round(t)), balance: v.balance, max: Math.round(v.max),
       fromSpot: Math.round(haversine(v, spot)),
+      ...photoTags(v.tags),
     }));
     if (filters.veg) venues.sort((a, b) => Number(b.veg) - Number(a.veg));   // stable: fairness order inside each group
     venues = venues.slice(0, 12);
@@ -76,6 +77,15 @@ export async function findFairSpot(friends, filters, onStep = () => {}, signal) 
     midpoint: { lat: mid.lat, lon: mid.lon, times: midTimes.map((t) => (t == null ? null : Math.round(t))) },
     venues, estimated, relaxed, placesDown, placesWhy, foundAt: Date.now(),
   };
+}
+
+// A photo of the place itself, when OpenStreetMap links one (photos.js turns it into a picture and a credit)
+function photoTags(tags = {}) {
+  const c = tags.wikimedia_commons || "";
+  const fromUrl = (tags.image || "").match(/commons\.wikimedia\.org\/wiki\/(File:[^?#]+)/i);
+  const file = /^File:/i.test(c) ? c : fromUrl ? decodeURIComponent(fromUrl[1]) : null;
+  const wikidata = /^Q\d+$/.test(tags.wikidata || "") ? tags.wikidata : null;
+  return file ? { photo: { file } } : wikidata ? { photo: { wikidata } } : {};
 }
 
 function pick(o, keys) {

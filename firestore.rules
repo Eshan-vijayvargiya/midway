@@ -5,10 +5,12 @@ service cloud.firestore {
   match /databases/{database}/documents {
     match /rooms/{room} {
       function shapeOk() {
-        return request.resource.data.keys().hasOnly(['created', 'expires', 'friends', 'filters', 'result', 'votes', 'expenses'])
+        return request.resource.data.keys().hasOnly(['created', 'expires', 'friends', 'filters', 'result', 'votes', 'expenses', 'pick'])
           && request.resource.data.friends is map
           && request.resource.data.friends.size() <= 8
-          && (!('expenses' in request.resource.data) || request.resource.data.expenses.size() <= 60);
+          && (!('expenses' in request.resource.data) || request.resource.data.expenses.size() <= 60)
+          && (!('pick' in request.resource.data) || request.resource.data.pick == null
+              || (request.resource.data.pick is string && request.resource.data.pick.size() <= 40));
       }
       allow get: if room.matches('^[A-Z2-9]{6}$');
       allow list: if false;

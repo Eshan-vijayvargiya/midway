@@ -12,8 +12,10 @@ Four friends live in four corners of the same city, at different colleges, and n
 - **Get the fair spot.** Midway times real road trips from every friend to about 75 possible meeting points and picks the one where the **longest ride is as short as possible**. It also shows how unfair the plain map midpoint would have been.
 - **Watch it work.** While it searches, a scanner hops from friend to friend and the points being tested light up on the map. When it's done, each friend's road route grows towards the spot, and every friend gets **Show route** and **Directions** (Google Maps) buttons.
 - **See places to eat around it.** Cafés, quick bites, sit-down places and dessert from OpenStreetMap, filtered by vibe, veg-friendly and a **budget per head** slider (₹150 to no limit).
-- **Swipe to vote.** Tinder-style cards show each friend's travel time to each place. The squad's favourites rise to the top, and each friend gets a Google Maps route button.
-- **Split the bill.** A Splitwise-style section: add each expense (who paid, how much), split it equally or by exact amounts, and Midway works out **who pays whom in the fewest payments**. Add UPI IDs and each payment becomes a one-tap "Pay with UPI" button; send the summary to the group on WhatsApp.
+- **Swipe to vote.** Tinder-style cards show a photo and each friend's travel time to each place. The squad's favourites rise to the top.
+- **Photos on every card.** If OpenStreetMap links a photo of the place itself, the card shows it. Otherwise it shows a typical dish for that kind of place (a dosa for a South Indian place, chai for a tea stall), taken from the dish's Wikipedia article. Every photo is free-licensed and credited with its author and licence. **Photos on Maps** opens the real place in Google Maps.
+- **Lock it in.** When the votes are in, lock in the winner. The place gets a star on the map, and every friend gets a Google Maps route to it.
+- **Split the bill.** Once a place is locked in, a Splitwise-style section opens. Add each expense (who paid, how much) and split it equally or by exact amounts. Midway then works out **who pays whom in the fewest payments**. Add UPI IDs and each payment becomes a one-tap "Pay with UPI" button. You can also send the summary to the group on WhatsApp.
 - **One link for the whole squad.** Share it on WhatsApp. In a live room, everyone adds their own spot from their own phone and votes update live. Spots are rounded to about 100 m before they are shared.
 
 ![Midway on a phone: the squad, the fair spot, the swipe deck](images/phone_flow.png)
@@ -41,6 +43,7 @@ The maths lives in [`js/fair.js`](js/fair.js): Weiszfeld's geometric median, the
 | Place search | Photon (by komoot), built on OpenStreetMap | Free, no key |
 | Travel times and routes | OSRM table and route services (FOSSGIS servers, then the OSRM demo server) | Free, no key |
 | Places to eat | OpenStreetMap via the Overpass API, with Photon and Nominatim as backups | Free, no key |
+| Photos | Wikimedia Commons, through the Wikipedia and Wikidata APIs | Free, no key |
 | Live rooms (optional) | Google Firebase Cloud Firestore | Free plan |
 | Hosting | GitHub Pages | Free |
 
@@ -86,6 +89,7 @@ The Firebase web config is meant to be public: what protects the data is the rul
 
 - Travel times come from OpenStreetMap roads **without live traffic**. At rush hour, add 30–50%. Transit (metro and bus) is not modelled.
 - OpenStreetMap rarely has prices, so the cost per head is **estimated from the type of place**: quick bites about ₹200, cafés ₹350, restaurants ₹500, bars and fine dining ₹1,100.
+- Most places in OpenStreetMap have no photo, so most cards show a **typical dish** for that kind of place, not that restaurant. The card says so ("Typical masala dosa"). **Photos on Maps** shows the real place. Real photos of every restaurant would need a paid Google Places key.
 - "Veg-friendly" uses OpenStreetMap's `diet:vegetarian` and cuisine tags, which are often missing in Indian cities. That is why it sorts veg-tagged places first instead of hiding the rest.
 
 ## Project structure
@@ -101,6 +105,7 @@ midway/
 │   ├── services.js     search, travel times and places, each with a fallback
 │   ├── room.js         live rooms (Firebase) and squad links
 │   ├── swipe.js        the swipe deck
+│   ├── photos.js       card photos: the place's own photo or a typical dish, with credits
 │   ├── split.js        the bill split: shares, balances, fewest-payments settle-up, UPI links
 │   ├── demo.js         the Ahmedabad sample squad
 │   └── config.js       Firebase config and service addresses
@@ -113,9 +118,9 @@ midway/
 - **The problem:** "fair" is not the map midpoint. I measured fairness in travel time and turned the choice into an optimisation: minimise the longest trip (minimax), with the average as a tie-breaker.
 - **The method:** a coarse-to-fine grid search over travel-time matrices. That takes 3 routing requests instead of hundreds, so it stays inside free API limits.
 - **Settle-up:** a greedy algorithm (largest debtor pays largest creditor) settles any bill in at most *people − 1* payments.
-- **Engineering:** each free service has a fallback; rooms sync live through Firestore; spots are rounded for privacy; the site is static and costs nothing to host.
+- **Engineering:** each free service has a fallback (cards fall back from the place's photo, to a dish photo, to an illustration); rooms sync live through Firestore; spots are rounded for privacy; the site is static and costs nothing to host.
 - **What I would add next:** metro and bus times, opening hours, and a "rush hour" switch using historical traffic.
 
 ## Credits
 
-Map data and tiles © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors (ODbL). Search by [Photon](https://photon.komoot.io). Travel times by [OSRM](https://project-osrm.org), hosted by [FOSSGIS](https://routing.openstreetmap.de). Places via the [Overpass API](https://overpass-api.de).
+Map data and tiles © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors (ODbL). Search by [Photon](https://photon.komoot.io). Travel times by [OSRM](https://project-osrm.org), hosted by [FOSSGIS](https://routing.openstreetmap.de). Places via the [Overpass API](https://overpass-api.de). Photos from [Wikimedia Commons](https://commons.wikimedia.org), credited on each card with the author and licence.

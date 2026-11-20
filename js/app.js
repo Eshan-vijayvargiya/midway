@@ -1,11 +1,12 @@
 // Midway: the screen logic. State lives here; fair.js does the maths, finder.js runs the search.
-import { MAX_FRIENDS, SERVICES } from "./config.js?v=7";
-import { findFairSpot, STEPS } from "./finder.js?v=7";
-import { searchPlaces, reverseGeocode, routeLine } from "./services.js?v=7";
-import { makeDeck } from "./swipe.js?v=7";
-import { DEMO_FRIENDS } from "./demo.js?v=7";
-import * as room from "./room.js?v=7";
-import { shares, balances, settle, upiLink } from "./split.js?v=7";
+import { MAX_FRIENDS, SERVICES } from "./config.js?v=8";
+import { findFairSpot, STEPS } from "./finder.js?v=8";
+import { searchPlaces, reverseGeocode, routeLine } from "./services.js?v=8";
+import { makeDeck } from "./swipe.js?v=8";
+import { DEMO_FRIENDS } from "./demo.js?v=8";
+import * as room from "./room.js?v=8";
+import { shares, balances, settle, upiLink } from "./split.js?v=8";
+import { loadPhotos, photoFor, mapsPhotosUrl } from "./photos.js?v=8";
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -15,6 +16,7 @@ const COLORS = ["#c8ff3d", "#ff4fb8", "#45d4ff", "#ff9a3d", "#a68bff", "#4dffb4"
 const STICKERS = ["🦊", "🐸", "🐼", "🦄", "🐙", "🐯", "🐧", "🦖", "🐨", "🦋", "🐵", "🐳"];
 const VIBE_EMOJI = { cafe: "☕", quick: "🍔", restaurant: "🍽️", dessert: "🍨" };
 const VIBE_NAME = { cafe: "Café", quick: "Quick bites", restaurant: "Sit-down", dessert: "Dessert" };
+const VIBE_TINT = { cafe: "var(--orange)", quick: "var(--pink)", restaurant: "var(--violet)", dessert: "var(--sky)" };
 
 const state = {
   mode: "local",            // "local" (this device) or "live" (Firebase room)
@@ -28,6 +30,7 @@ const state = {
   pinFor: null,             // friend whose spot is being dropped on the map
   running: false,           // a search is in progress: the squad and vibe are locked
   expenses: [],             // the bill split: see split.js
+  pick: null,               // the place the squad locked in (a venue id); the bill split appears after this
 };
 const LOCAL_VOTER = "you";
 
@@ -291,9 +294,11 @@ function drawMap(pickId) {
   if (!r) routeLayer?.clearLayers();
   if (r) {
     r.venues.forEach((v) => {
-      const icon = L.divIcon({ className: "", html: `<div class="m-place${v.id === pickId ? " pick" : ""}"></div>`, iconSize: [22, 22], iconAnchor: [11, 11] });
-      L.marker([v.lat, v.lon], { icon, keyboard: false }).addTo(layer)
-        .bindTooltip(`${esc(v.name)}<br>longest ride ${v.max} min`, { className: "tip", direction: "top" });
+      const locked = v.id === state.pick;
+      const icon = L.divIcon({ className: "", html: `<div class="m-place${locked ? " locked" : v.id === pickId ? " pick" : ""}">${locked ? "★" : ""}</div>`,
+        iconSize: locked ? [30, 30] : [22, 22], iconAnchor: locked ? [15, 15] : [11, 11] });
+      L.marker([v.lat, v.lon], { icon, keyboard: false, zIndexOffset: locked ? 500 : 0 }).addTo(layer)
+        .bindTooltip(`${locked ? "Locked in: " : ""}${esc(v.name)}<br>longest ride ${v.max} min`, { className: "tip", direction: "top" });
     });
     const spotIcon = L.divIcon({ className: "", html: `<div class="m-spot"></div>`, iconSize: [30, 30], iconAnchor: [15, 15] });
     L.marker([r.spot.lat, r.spot.lon], { icon: spotIcon, title: "The fair spot" }).addTo(layer)
@@ -449,9 +454,9 @@ async function runSearch() {
   try {
     const result = await findFairSpot(friends, state.filters, step, searchCtl.signal);
     result.friendIds = friends.map((f) => f.id);
-    state.result = result; state.stale = false; state.votes = {};
+    state.result = result; state.stale = false; state.votes = {}; state.pick = null;
     if (state.mode === "live") await room.saveResult(state.code, result);
-    else store.set("midway.result", result);
+    else { store.set("midway.result", result); store.set("midway.votes", {}); store.set("midway.pick", null); }
     showResults();
   } catch (e) {
     const msg = e.name === "AbortError" ? "Stopped. Make your changes, then press “Find our fair spot” again."
@@ -478,6 +483,8 @@ function showResults() {
   fitAll();
   focused = -1;
   drawRoutes();
+  renderSplit();
+  loadPhotos(state.result.venues).then(paintPhotos);
   requestAnimationFrame(() => $("#stepResults").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" }));
 }
 function renderResultsIfAny() { if (state.result && !$("#resultBody").hidden) { renderSpot(); renderBoard(); } }
@@ -524,18 +531,45 @@ function unvotedVenues() {
   return (state.result?.venues || []).filter((v) => !(state.votes[v.id] && me in state.votes[v.id]));
 }
 
+const whatOf = (v) => [VIBE_NAME[v.vibe], ...(v.cuisine || [])].filter(Boolean).join(", ");
+const distOf = (v) => (v.fromSpot < 1000 ? `${v.fromSpot} m` : `${(v.fromSpot / 1000).toFixed(1)} km`);
+
+// The photo strip: the place's own photo, a typical dish (both credited), or an illustration while loading / if none.
+function photoHtml(v) {
+  const p = photoFor(v);
+  const tint = VIBE_TINT[v.vibe] || "var(--violet)";
+  const art = `<span class="art-emoji" aria-hidden="true">${VIBE_EMOJI[v.vibe] || "🍽️"}</span>`;
+  if (!p) return `<div class="ph art${p === undefined ? " loading" : ""}" data-venue="${esc(v.id)}" style="--tint:${tint}">${art}</div>`;
+  const label = p.kind === "place" ? `Photo of ${v.name}` : `A typical ${p.dish}`;
+  return `<div class="ph" data-venue="${esc(v.id)}" style="--tint:${tint}">
+      <img src="${esc(p.src)}"${p.srcset ? ` srcset="${esc(p.srcset)}" sizes="(max-width: 900px) 92vw, 460px"` : ""} alt="${esc(label)}"
+        draggable="false" decoding="async" onerror="this.parentNode.classList.add('art')">${art}
+      <p class="credit"><b>${p.kind === "place" ? "This place." : `Typical ${esc(p.dish)}.`}</b>
+        <a href="${esc(p.link)}" target="_blank" rel="noopener">Photo: ${esc(p.author)}, ${esc(p.license)}</a></p>
+    </div>`;
+}
+
+// photos arrive after the cards are drawn: swap them in place, so a card being dragged isn't redrawn
+function paintPhotos() {
+  const byId = new Map((state.result?.venues || []).map((v) => [v.id, v]));
+  $$(".ph[data-venue]").forEach((el) => { const v = byId.get(el.dataset.venue); if (v) el.outerHTML = photoHtml(v); });
+}
+
 function cardHtml(v) {
   const fr = resultFriends();
   const cost = v.cost || [0, 200, 400, 1100][v.budget || 2];                       // older saved results had a ₹ band
   const tags = [`<span class="tag">~₹${cost.toLocaleString("en-IN")} per head (est.)</span>`, `<span class="tag">${v.balance}% balanced</span>`];
   if (v.veg) tags.push(`<span class="tag veg">🌱 Veg-friendly</span>`);
-  const what = [VIBE_NAME[v.vibe], ...v.cuisine].filter(Boolean).join(", ");
   return `
-    <div class="vibe">${VIBE_EMOJI[v.vibe] || "🍽️"}</div>
-    <h3>${esc(v.name)}</h3>
-    <p class="meta">${esc(what)}. ${v.fromSpot < 1000 ? `${v.fromSpot} m` : `${(v.fromSpot / 1000).toFixed(1)} km`} from the fair spot</p>
-    <div class="tags">${tags.join("")}</div>
-    <div class="mini">${fr.map((f, i) => `<span style="--friend:${f.color}">${esc(f.emoji)} ${v.times[i]} min</span>`).join("")}</div>`;
+    <div class="card-top">${photoHtml(v)}
+      <a class="gm" href="${esc(mapsPhotosUrl(v))}" target="_blank" rel="noopener" aria-label="Photos and reviews of ${esc(v.name)} on Google Maps">📸 Photos on Maps</a>
+    </div>
+    <div class="card-body">
+      <h3>${esc(v.name)}</h3>
+      <p class="meta">${esc(whatOf(v))}. ${distOf(v)} from the fair spot</p>
+      <div class="tags">${tags.join("")}</div>
+      <div class="mini">${fr.map((f, i) => `<span style="--friend:${f.color}">${esc(f.emoji)} ${v.times[i]} min</span>`).join("")}</div>
+    </div>`;
 }
 
 function onVote(v, value) {
@@ -556,21 +590,24 @@ function renderBoard(lastId) {
   }).filter((r) => r.yes.length).sort((a, b) => b.score - a.score || a.v.max - b.v.max);
   const voters = new Set(Object.values(state.votes).flatMap((o) => Object.keys(o)));
   $("#boardHint").textContent = voters.size ? `${voters.size} ${voters.size === 1 ? "person has" : "people have"} voted` : "";
-  const fr = resultFriends();
   $("#board").innerHTML = rows.length ? rows.slice(0, 6).map((r, k) => `
-    <li class="${k === 0 ? "top" : ""}" data-id="${r.v.id}">
+    <li class="${k === 0 ? "top" : ""}${r.v.id === state.pick ? " locked" : ""}" data-id="${r.v.id}">
       <span class="rank">${k + 1}</span>
-      <span class="nm">${esc(r.v.name)}<small>longest ride ${r.v.max} min, ${r.v.balance}% balanced</small></span>
+      <span class="nm">${esc(r.v.name)}<small>${r.v.id === state.pick ? "Locked in. " : ""}longest ride ${r.v.max} min, ${r.v.balance}% balanced</small></span>
       <span class="votes" aria-label="${r.yes.length} yes votes">${r.yes.map((id) => esc(friendById(id)?.emoji || (id === LOCAL_VOTER ? "💖" : "🙂"))).join("")}</span>
-      <div class="go">${fr.map((f, i) => f.lat == null ? "" : `<a style="--friend:${f.color}" target="_blank" rel="noopener"
-          href="https://www.google.com/maps/dir/?api=1&origin=${f.lat},${f.lon}&destination=${r.v.lat},${r.v.lon}&travelmode=${f.mode === "foot" ? "walking" : "driving"}">${esc(f.emoji)} Route for ${esc(displayName(f, i))}</a>`).join("")}</div>
+      <div class="go">${r.v.id === state.pick ? "" : `<button type="button" class="pill lock-it" data-id="${r.v.id}">Lock in this place</button>`}${routeLinks(r.v)}</div>
     </li>`).join("")
-    : `<li class="empty" aria-disabled="true"><span></span><span class="nm"><small>Swipe right on places you like. The squad's favourites show up here.</small></span></li>`;
+    : `<li class="empty" aria-disabled="true"><span></span><span class="nm"><small>Swipe right on places you like. The squad's favourites show up here; lock in the winner to split the bill.</small></span></li>`;
   $$("#board li[data-id]").forEach((li) => li.addEventListener("click", (e) => {
-    if (e.target.closest("a")) return;
+    if (e.target.closest("a, button")) return;
     li.classList.toggle("open");
     drawMap(li.dataset.id);
   }));
+  $$("#board .lock-it").forEach((b) => b.addEventListener("click", () => lockPick(b.dataset.id)));
+  const lockBtn = $("#lockBtn");
+  lockBtn.hidden = !rows.length || Boolean(pickedVenue());
+  if (rows.length) { lockBtn.textContent = `Lock in ${rows[0].v.name}`; lockBtn.dataset.id = rows[0].v.id; }
+  renderPick();
   if (lastId) drawMap(rows[0]?.v.id);
   if (!$("#stepSplit").hidden && !$("#exWhat").value) {
     const pick = topPickName();
@@ -578,6 +615,46 @@ function renderBoard(lastId) {
   }
 }
 
+
+// Google Maps directions from each friend to a place
+function routeLinks(v) {
+  return resultFriends().map((f, i) => f.lat == null ? "" : `<a class="route-link" style="--friend:${f.color}" target="_blank" rel="noopener"
+    href="https://www.google.com/maps/dir/?api=1&origin=${f.lat},${f.lon}&destination=${v.lat},${v.lon}&travelmode=${f.mode === "foot" ? "walking" : "driving"}">${esc(f.emoji)} Route for ${esc(displayName(f, i))}</a>`).join("");
+}
+
+/* ---------------- lock in the place ---------------- */
+const pickedVenue = () => (state.pick && state.result?.venues?.find((v) => v.id === state.pick)) || null;
+
+function lockPick(id) {
+  state.pick = id || null;
+  if (state.mode === "live") room.savePick(state.code, state.pick).catch(() => toast("Couldn't save to the room. Check your connection."));
+  else store.set("midway.pick", state.pick);
+  renderBoard(); renderSplit(); drawMap();
+  const v = pickedVenue();
+  if (v) {
+    toast(`Locked in: ${v.name}. Split the bill below when you're done.`);
+    requestAnimationFrame(() => $("#picked").scrollIntoView({ behavior: calm() ? "auto" : "smooth", block: "start" }));
+  }
+}
+
+function renderPick() {
+  const v = pickedVenue(), box = $("#picked");
+  box.hidden = !v;
+  if (!v) { box.innerHTML = ""; return; }
+  box.innerHTML = `
+    ${photoHtml(v)}
+    <div class="picked-body">
+      <p class="spot-kicker">Locked in</p>
+      <h2 class="picked-name">${esc(v.name)}</h2>
+      <p class="meta">${esc(whatOf(v))}, ${distOf(v)} from the fair spot. Nobody rides more than ${v.max} min.</p>
+      <div class="go">${routeLinks(v)}</div>
+      <div class="picked-actions">
+        <a class="pill" href="${esc(mapsPhotosUrl(v))}" target="_blank" rel="noopener">📸 Photos on Maps</a>
+        <button type="button" class="pill" id="unpickBtn">Change place</button>
+      </div>
+    </div>`;
+  $("#unpickBtn").addEventListener("click", () => lockPick(null));
+}
 
 /* ---------------- split the bill ---------------- */
 const split = { mode: "equal", among: null, exact: {} };      // the expense being typed
@@ -593,6 +670,7 @@ function saveExpenses() {
 }
 
 function topPickName() {
+  if (pickedVenue()) return pickedVenue().name;
   const venues = state.result?.venues || [];
   let best = null, bestYes = 0;
   for (const v of venues) {
@@ -604,7 +682,7 @@ function topPickName() {
 
 function renderSplit() {
   const sec = $("#stepSplit");
-  sec.hidden = state.friends.length < 2;
+  sec.hidden = state.friends.length < 2 || (!pickedVenue() && !state.expenses.length);
   if (sec.hidden) return;
   const ids = state.friends.map((f) => f.id);
   if (!split.among) split.among = new Set(ids);
@@ -778,7 +856,7 @@ function startDemo() {
   state.mode = "local";
   state.friends = [];
   DEMO_FRIENDS.forEach((d) => state.friends.push(newFriend({ name: d.name, emoji: d.emoji, place: `${d.place}, ${d.area}`, lat: d.lat, lon: d.lon })));
-  state.result = null; state.votes = {}; state.expenses = [];
+  state.result = null; state.votes = {}; state.expenses = []; state.pick = null;
   renderFriends(); paintFilters(); drawMap(); fitAll();
   $("#shareBtn").hidden = false;
   toast("Four sample friends across Ahmedabad. Press “Find our fair spot”.");
@@ -811,6 +889,7 @@ async function listenToRoom(joining = false) {
     if (data.result) state.result = data.result;
     state.votes = data.votes || {};
     state.expenses = data.expenses || [];
+    state.pick = data.pick || null;
     if (!$("#stepSplit").contains(document.activeElement)) renderSplit(); else renderExpenses();
     if (first && joining && (!state.me || !friendById(state.me))) {
       const me = newFriend();
@@ -881,6 +960,7 @@ function boot() {
   $("#findBtn").addEventListener("click", runSearch);
   $("#inBtn").addEventListener("click", () => deck.vote(1));
   $("#nahBtn").addEventListener("click", () => deck.vote(-1));
+  $("#lockBtn").addEventListener("click", (e) => lockPick(e.currentTarget.dataset.id));
   $("#shareBtn").addEventListener("click", shareSquad);
   $("#copyBtn").addEventListener("click", async () => {
     try { await navigator.clipboard.writeText($("#shareUrl").value); toast("Link copied"); }
@@ -914,6 +994,7 @@ function boot() {
         state.friends = saved.friends; state.filters = saved.filters || state.filters;
         state.result = store.get("midway.result"); state.votes = store.get("midway.votes") || {};
         state.expenses = store.get("midway.expenses") || [];
+        state.pick = store.get("midway.pick");
         renderFriends(); paintFilters();
         if (state.result) showResults(); else { drawMap(); fitAll(); }
         $("#shareBtn").hidden = false;

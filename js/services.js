@@ -1,7 +1,7 @@
 // Talking to the outside world: place search, travel times and places to eat.
 // Every call has a fallback, so a slow or busy free server never leaves the app stuck.
-import { SERVICES } from "./config.js?v=7";
-import { haversine } from "./fair.js?v=7";
+import { SERVICES } from "./config.js?v=8";
+import { haversine } from "./fair.js?v=8";
 
 // signal = the person's Stop button; timeoutMs = give up on one slow server and try the next
 async function getJSON(url, opts = {}, timeoutMs = 15000, signal) {

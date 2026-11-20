@@ -1,5 +1,5 @@
 // Squads: live rooms (Firebase) when configured, otherwise a squad link that carries the friends list.
-import { FIREBASE_CONFIG } from "./config.js?v=7";
+import { FIREBASE_CONFIG } from "./config.js?v=8";
 
 export const liveRooms = Boolean(FIREBASE_CONFIG);
 const FB = "https://www.gstatic.com/firebasejs/10.12.2";
@@ -30,7 +30,7 @@ export async function createRoom(code, friends, filters) {
     created: fs.serverTimestamp(),
     expires: new Date(Date.now() + 7 * 24 * 3600 * 1000),   // a Firestore TTL policy can delete rooms after a week
     friends: Object.fromEntries(friends.map((f) => [f.id, shareable(f)])),
-    filters, result: null, votes: {},
+    filters, result: null, votes: {}, pick: null,
   });
 }
 
@@ -56,7 +56,13 @@ export async function saveFilters(code, filters) {
 
 export async function saveResult(code, result) {
   await init();
-  await fs.updateDoc(fs.doc(db, "rooms", code), { result, votes: {} });
+  await fs.updateDoc(fs.doc(db, "rooms", code), { result, votes: {}, pick: null });
+}
+
+// the place the squad locked in (a venue id, or null to choose again)
+export async function savePick(code, pick) {
+  await init();
+  await fs.updateDoc(fs.doc(db, "rooms", code), { pick });
 }
 
 export async function saveExpenses(code, expenses) {

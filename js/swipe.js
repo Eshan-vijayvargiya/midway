@@ -31,7 +31,9 @@ export function makeDeck(el, { onVote, render }) {
   function drag(card, item) {
     let x0 = 0, dx = 0, active = false;
     const stampIn = card.querySelector(".stamp.in"), stampNah = card.querySelector(".stamp.nah");
-    card.addEventListener("pointerdown", (e) => { active = true; x0 = e.clientX; dx = 0; card.classList.add("dragging"); card.setPointerCapture(e.pointerId); });
+    card.addEventListener("pointerdown", (e) => {
+      if (e.target.closest("a, button")) return;                 // links on the card (photo credit, Google Maps) stay clickable
+      active = true; x0 = e.clientX; dx = 0; card.classList.add("dragging"); card.setPointerCapture(e.pointerId); });
     card.addEventListener("pointermove", (e) => {
       if (!active) return;
       dx = e.clientX - x0;
