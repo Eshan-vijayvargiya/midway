@@ -1,5 +1,5 @@
 // Squads: live rooms (Firebase) when configured, otherwise a squad link that carries the friends list.
-import { FIREBASE_CONFIG } from "./config.js?v=6";
+import { FIREBASE_CONFIG } from "./config.js?v=7";
 
 export const liveRooms = Boolean(FIREBASE_CONFIG);
 const FB = "https://www.gstatic.com/firebasejs/10.12.2";
@@ -21,7 +21,7 @@ export function newCode() {
 export function shareable(friend) {
   const r = (x) => (x == null ? null : Math.round(x * 1000) / 1000);
   return { id: friend.id, name: friend.name || "", emoji: friend.emoji, color: friend.color, mode: friend.mode || "car",
-           place: friend.place || "", lat: r(friend.lat), lon: r(friend.lon) };
+           place: friend.place || "", lat: r(friend.lat), lon: r(friend.lon), upi: friend.upi || "" };
 }
 
 export async function createRoom(code, friends, filters) {
@@ -57,6 +57,11 @@ export async function saveFilters(code, filters) {
 export async function saveResult(code, result) {
   await init();
   await fs.updateDoc(fs.doc(db, "rooms", code), { result, votes: {} });
+}
+
+export async function saveExpenses(code, expenses) {
+  await init();
+  await fs.updateDoc(fs.doc(db, "rooms", code), { expenses });
 }
 
 export async function saveVote(code, venueId, friendId, value) {

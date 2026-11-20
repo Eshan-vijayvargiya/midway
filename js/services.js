@@ -1,7 +1,7 @@
 // Talking to the outside world: place search, travel times and places to eat.
 // Every call has a fallback, so a slow or busy free server never leaves the app stuck.
-import { SERVICES } from "./config.js?v=5";
-import { haversine } from "./fair.js?v=5";
+import { SERVICES } from "./config.js?v=7";
+import { haversine } from "./fair.js?v=7";
 
 // signal = the person's Stop button; timeoutMs = give up on one slow server and try the next
 async function getJSON(url, opts = {}, timeoutMs = 15000, signal) {
@@ -100,16 +100,41 @@ export async function travelMatrix(friends, dests, signal) {
   return { matrix: rows, estimated };
 }
 
-// Named places to eat within radiusM metres of a point (OpenStreetMap via Overpass).
-// Public Overpass servers are often busy, so two are asked at once and the first good answer wins.
+// Named places to eat within radiusM metres of a point. Three free sources, best first:
+//   1 Overpass (richest data: cuisine, veg tags)   2 Photon (fast, already used for search)   3 Nominatim
+// Each returns the same shape: { id, name, lat, lon, tags }.
 export async function placesNear(pt, radiusM, signal) {
+  const why = [];
+  for (const source of [overpassPlaces, photonPlaces, nominatimPlaces]) {
+    try {
+      const found = (await source(pt, radiusM, signal, why)).filter((p) => p.name && p.lat != null && haversine(p, pt) <= radiusM * 1.15);
+      if (found.length) return found;
+      why.push(`${source.label}: nothing found`);
+    } catch (e) {
+      if (stopped(e)) throw e;
+      why.push(`${source.label}: ${e.message}`);
+    }
+  }
+  throw new Error(`PLACES_DOWN (${why.join("; ")})`);
+}
+
+const AMENITIES = ["restaurant", "cafe", "fast_food", "ice_cream", "food_court"];
+
+// 1 · Overpass. Public servers are often busy, so two are asked at once and the first good answer wins.
+async function overpassPlaces(pt, radiusM, signal, whyOut) {
   const q = `[out:json][timeout:15];
 nwr(around:${Math.round(radiusM)},${pt.lat.toFixed(5)},${pt.lon.toFixed(5)})["amenity"~"^(restaurant|cafe|fast_food|ice_cream|food_court)$"]["name"];
 out center tags 400;`;
+  const why = [];                                            // what each server said, for the on-screen note
   const ask = async (base) => {
-    const data = await getJSON(base, { method: "POST", body: new URLSearchParams({ data: q }) }, 20000, signal);
-    if (!Array.isArray(data.elements)) throw new Error("bad answer");
-    return data.elements;
+    try {
+      const data = await getJSON(base, { method: "POST", body: new URLSearchParams({ data: q }) }, 12000, signal);
+      if (!Array.isArray(data.elements)) throw new Error(data.remark || "bad answer");
+      return data.elements;
+    } catch (e) {
+      why.push(`${new URL(base).hostname}: ${e.name === "TypeError" ? "blocked or offline" : e.message}`);
+      throw e;
+    }
   };
   let elements = null;
   for (let i = 0; i < SERVICES.places.length && !elements; i += 2) {
@@ -119,7 +144,7 @@ out center tags 400;`;
       if (signal?.aborted) throw new DOMException("Stopped", "AbortError");
     }
   }
-  if (!elements) throw new Error("PLACES_DOWN");
+  if (!elements) { whyOut.push(...why); throw new Error("no server answered"); }
   return elements.map((e) => ({
     id: `${e.type}/${e.id}`,
     name: e.tags.name,
@@ -128,6 +153,55 @@ out center tags 400;`;
     tags: e.tags,
   })).filter((p) => p.lat != null);
 }
+overpassPlaces.label = "Overpass";
+
+// 2 · Photon reverse search, one request per kind of place, nearest first.
+async function photonPlaces(pt, radiusM, signal) {
+  const kinds = ["restaurant", "cafe", "fast_food", "ice_cream"];
+  const lists = await Promise.all(kinds.map(async (k) => {
+    const u = `${SERVICES.search}/reverse?lat=${pt.lat.toFixed(5)}&lon=${pt.lon.toFixed(5)}&limit=40&radius=${(radiusM / 1000).toFixed(1)}&osm_tag=amenity:${k}&lang=en`;
+    try {
+      const data = await getJSON(u, {}, 10000, signal);
+      return (data.features || []).filter((f) => f.properties?.osm_key === "amenity" && AMENITIES.includes(f.properties?.osm_value));
+    } catch (e) {
+      if (stopped(e)) throw e;
+      return [];
+    }
+  }));
+  const seen = new Set();
+  return lists.flat().map((f) => {
+    const pr = f.properties;
+    return { id: `${pr.osm_type === "W" ? "way" : pr.osm_type === "R" ? "relation" : "node"}/${pr.osm_id}`, name: pr.name,
+             lat: f.geometry.coordinates[1], lon: f.geometry.coordinates[0], tags: { amenity: pr.osm_value, name: pr.name } };
+  }).filter((p) => p.name && !seen.has(p.id) && seen.add(p.id));
+}
+photonPlaces.label = "Photon";
+
+// 3 · Nominatim, searching each kind of place inside a box around the spot (one request a second, as its rules ask).
+async function nominatimPlaces(pt, radiusM, signal) {
+  const dLat = radiusM / 111320, dLon = radiusM / (111320 * Math.cos((pt.lat * Math.PI) / 180));
+  const box = [pt.lon - dLon, pt.lat + dLat, pt.lon + dLon, pt.lat - dLat].map((x) => x.toFixed(5)).join(",");
+  const out = [], seen = new Set();
+  for (const k of ["restaurant", "cafe", "fast food", "ice cream"]) {
+    const u = `https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(k)}&viewbox=${box}&bounded=1&limit=40&extratags=1&accept-language=en`;
+    try {
+      const rows = await getJSON(u, {}, 10000, signal);
+      for (const r of rows) {
+        if (r.category !== "amenity" || !AMENITIES.includes(r.type)) continue;
+        const id = `${r.osm_type}/${r.osm_id}`;
+        if (seen.has(id)) continue;
+        seen.add(id);
+        out.push({ id, name: r.name || r.display_name.split(",")[0], lat: Number(r.lat), lon: Number(r.lon),
+                   tags: { amenity: r.type, name: r.name, ...(r.extratags || {}) } });
+      }
+    } catch (e) {
+      if (stopped(e)) throw e;
+    }
+    await new Promise((res) => setTimeout(res, 1100));
+  }
+  return out;
+}
+nominatimPlaces.label = "Nominatim";
 
 // The road route from one friend to the spot, as [lat, lon] points for the map (null if no server answers).
 export async function routeLine(from, to, mode = "car", signal) {

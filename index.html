@@ -13,7 +13,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,700&family=Unbounded:wght@600;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
-<link rel="stylesheet" href="styles.css?v=6">
+<link rel="stylesheet" href="styles.css?v=7">
 </head>
 <body>
 
@@ -89,14 +89,14 @@
       </div>
       <div class="row-split">
         <button class="toggle" id="vegToggle" aria-pressed="false"><span class="knob"></span>🌱 Veg-friendly first</button>
-        <div class="seg" role="group" aria-label="Budget per head (approx.)">
-          <button data-budget="0" aria-pressed="true">Any</button>
-          <button data-budget="1" aria-pressed="false">₹</button>
-          <button data-budget="2" aria-pressed="false">₹₹</button>
-          <button data-budget="3" aria-pressed="false">₹₹₹</button>
-        </div>
       </div>
-      <p class="fine">Budget is a guess from the type of place: street food and quick bites ₹, cafés and most restaurants ₹₹, bars and fine dining ₹₹₹.</p>
+      <div class="budget">
+        <label for="budget">Budget per head</label>
+        <output id="budgetOut" for="budget">No limit</output>
+        <input type="range" id="budget" min="150" max="1500" step="50" value="1500" aria-describedby="budgetNote">
+        <div class="budget-marks" aria-hidden="true"><span>₹150</span><span>₹500</span><span>₹1,000</span><span>No limit</span></div>
+      </div>
+      <p class="fine" id="budgetNote">Prices are estimated from the type of place, because maps rarely list them: quick bites about ₹200, cafés ₹350, restaurants ₹500, bars and fine dining ₹1,100 per head.</p>
     </section>
 
     <div class="find-bar">
@@ -133,6 +133,34 @@
         </div>
       </div>
     </section>
+
+    <section class="step split" id="stepSplit" aria-labelledby="hSplit" hidden>
+      <div class="step-head"><h2 id="hSplit">Split the bill</h2><span class="hint" id="splitHint"></span></div>
+      <form class="split-form" id="splitForm" novalidate>
+        <div class="split-row">
+          <input id="exWhat" maxlength="40" placeholder="What for? e.g. Dinner" aria-label="What the expense was for">
+          <div class="money"><span aria-hidden="true">₹</span><input id="exAmount" type="number" inputmode="decimal" min="1" step="any" placeholder="Amount" aria-label="Amount in rupees"></div>
+        </div>
+        <div class="split-row">
+          <label class="split-label" for="exPaidBy">Paid by</label>
+          <select id="exPaidBy"></select>
+        </div>
+        <div class="seg seg-wide" role="group" aria-label="How to split" id="exMode">
+          <button type="button" data-mode="equal" aria-pressed="true">Split equally</button>
+          <button type="button" data-mode="exact" aria-pressed="false">Exact amounts</button>
+        </div>
+        <div class="among" id="exAmong"></div>
+        <p class="fine" id="exCheck" aria-live="polite"></p>
+        <button class="btn btn-in btn-wide" type="submit" id="exAdd">Add expense</button>
+      </form>
+      <ol class="expenses" id="expenseList"></ol>
+      <div class="settle" id="settle"></div>
+      <details class="upi">
+        <summary>Add UPI IDs for one-tap payments (optional)</summary>
+        <div class="upi-list" id="upiList"></div>
+        <p class="fine">Only shared with this squad. Each "Pay with UPI" button opens your UPI app with the amount filled in; you confirm the payment there.</p>
+      </details>
+    </section>
   </aside>
 
   <section class="map-wrap" aria-label="Map">
@@ -156,6 +184,6 @@
 <div class="toast" id="toast" role="status" hidden></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
-<script type="module" src="js/app.js?v=6"></script>
+<script type="module" src="js/app.js?v=7"></script>
 </body>
 </html>

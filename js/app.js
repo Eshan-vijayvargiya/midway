@@ -1,10 +1,11 @@
 // Midway: the screen logic. State lives here; fair.js does the maths, finder.js runs the search.
-import { MAX_FRIENDS, SERVICES } from "./config.js?v=5";
-import { findFairSpot, STEPS } from "./finder.js?v=5";
-import { searchPlaces, reverseGeocode, routeLine } from "./services.js?v=5";
-import { makeDeck } from "./swipe.js?v=5";
-import { DEMO_FRIENDS } from "./demo.js?v=5";
-import * as room from "./room.js?v=5";
+import { MAX_FRIENDS, SERVICES } from "./config.js?v=7";
+import { findFairSpot, STEPS } from "./finder.js?v=7";
+import { searchPlaces, reverseGeocode, routeLine } from "./services.js?v=7";
+import { makeDeck } from "./swipe.js?v=7";
+import { DEMO_FRIENDS } from "./demo.js?v=7";
+import * as room from "./room.js?v=7";
+import { shares, balances, settle, upiLink } from "./split.js?v=7";
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -26,6 +27,7 @@ const state = {
   stale: false,
   pinFor: null,             // friend whose spot is being dropped on the map
   running: false,           // a search is in progress: the squad and vibe are locked
+  expenses: [],             // the bill split: see split.js
 };
 const LOCAL_VOTER = "you";
 
@@ -73,6 +75,7 @@ function renderFriends() {
   state.friends.forEach((f, i) => listEl.appendChild(friendCard(f, i)));
   $("#addFriendBtn").hidden = state.friends.length >= MAX_FRIENDS;
   updateFindButton();
+  renderSplit();
 }
 
 function friendCard(f, i) {
@@ -212,16 +215,25 @@ function wireFilters() {
     e.currentTarget.setAttribute("aria-pressed", String(state.filters.veg));
     filtersChanged();
   });
-  $$(".seg button").forEach((b) => b.addEventListener("click", () => {
-    state.filters.budget = Number(b.dataset.budget);
-    $$(".seg button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
-    filtersChanged();
-  }));
+  $("#budget").addEventListener("input", (e) => {
+    const v = Number(e.target.value);
+    state.filters.budget = v >= 1500 ? 0 : v;            // the far right of the slider means "no limit"
+    paintBudget();
+  });
+  $("#budget").addEventListener("change", filtersChanged);
 }
 function paintFilters() {
   $$(".chip[data-vibe]").forEach((b) => b.setAttribute("aria-pressed", String(state.filters.vibes.includes(b.dataset.vibe))));
   $("#vegToggle").setAttribute("aria-pressed", String(state.filters.veg));
-  $$(".seg button").forEach((b) => b.setAttribute("aria-pressed", String(Number(b.dataset.budget) === state.filters.budget)));
+  if (state.filters.budget > 0 && state.filters.budget < 10) state.filters.budget = 0;   // old ₹/₹₹/₹₹₹ setting
+  $("#budget").value = state.filters.budget || 1500;
+  paintBudget();
+}
+function paintBudget() {
+  const b = state.filters.budget;
+  $("#budgetOut").textContent = b ? `up to ₹${b.toLocaleString("en-IN")}` : "No limit";
+  const pct = ((($("#budget").value) - 150) / (1500 - 150)) * 100;
+  $("#budget").style.setProperty("--fill", `${pct}%`);
 }
 function filtersChanged() {
   if (state.mode === "live") room.saveFilters(state.code, state.filters).catch(() => {});
@@ -501,7 +513,7 @@ function renderSpot() {
     ? "The free routing servers were busy, so these are estimates from distance. "
     : "Road travel times from OpenStreetMap, without traffic. Add 30–50% at rush hour. ")
     + (r.relaxed ? "Few places matched every filter here, so some filters were relaxed. " : "")
-    + (r.placesDown ? "The free places server is busy, so restaurants couldn't load this time. Press the button again in a minute." : "");
+    + (r.placesDown ? `The free places servers didn't answer, so restaurants couldn't load this time. Press the button again in a minute. (${r.placesWhy || ""})` : "");
   $("#deckHint").textContent = r.venues.length ? `${r.venues.length} places near the spot` : "";
 }
 
@@ -514,7 +526,8 @@ function unvotedVenues() {
 
 function cardHtml(v) {
   const fr = resultFriends();
-  const tags = [`<span class="tag">${"₹".repeat(v.budget)} approx.</span>`, `<span class="tag">${v.balance}% balanced</span>`];
+  const cost = v.cost || [0, 200, 400, 1100][v.budget || 2];                       // older saved results had a ₹ band
+  const tags = [`<span class="tag">~₹${cost.toLocaleString("en-IN")} per head (est.)</span>`, `<span class="tag">${v.balance}% balanced</span>`];
   if (v.veg) tags.push(`<span class="tag veg">🌱 Veg-friendly</span>`);
   const what = [VIBE_NAME[v.vibe], ...v.cuisine].filter(Boolean).join(", ");
   return `
@@ -559,6 +572,171 @@ function renderBoard(lastId) {
     drawMap(li.dataset.id);
   }));
   if (lastId) drawMap(rows[0]?.v.id);
+  if (!$("#stepSplit").hidden && !$("#exWhat").value) {
+    const pick = topPickName();
+    $("#exWhat").placeholder = pick ? `What for? e.g. Dinner at ${pick}` : "What for? e.g. Dinner";
+  }
+}
+
+
+/* ---------------- split the bill ---------------- */
+const split = { mode: "equal", among: null, exact: {} };      // the expense being typed
+const money = (x) => `₹${Math.round(x).toLocaleString("en-IN")}`;
+const nameOf = (id) => {
+  const i = state.friends.findIndex((f) => f.id === id);
+  return i >= 0 ? `${state.friends[i].emoji} ${displayName(state.friends[i], i)}` : "👻 Someone who left";
+};
+
+function saveExpenses() {
+  if (state.mode === "live") room.saveExpenses(state.code, state.expenses).catch(() => toast("Couldn't save the bill to the room. Check your connection."));
+  else store.set("midway.expenses", state.expenses);
+}
+
+function topPickName() {
+  const venues = state.result?.venues || [];
+  let best = null, bestYes = 0;
+  for (const v of venues) {
+    const yes = Object.values(state.votes[v.id] || {}).filter((x) => x === 1).length;
+    if (yes > bestYes) { best = v; bestYes = yes; }
+  }
+  return best?.name;
+}
+
+function renderSplit() {
+  const sec = $("#stepSplit");
+  sec.hidden = state.friends.length < 2;
+  if (sec.hidden) return;
+  const ids = state.friends.map((f) => f.id);
+  if (!split.among) split.among = new Set(ids);
+  ids.forEach((id) => { if (!split.seen?.has(id)) split.among.add(id); });   // new friends join the split by default
+  split.seen = new Set(ids);
+
+  // paid by
+  const sel = $("#exPaidBy"), keep = sel.value;
+  sel.innerHTML = state.friends.map((f, i) => `<option value="${f.id}">${esc(f.emoji)} ${esc(displayName(f, i))}</option>`).join("");
+  sel.value = ids.includes(keep) ? keep : (ids.includes(state.me) ? state.me : ids[0]);
+  const pick = topPickName();
+  $("#exWhat").placeholder = pick ? `What for? e.g. Dinner at ${pick}` : "What for? e.g. Dinner";
+
+  // split equally among chosen friends, or exact amounts
+  $$("#exMode button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.mode === split.mode)));
+  $("#exAmong").innerHTML = split.mode === "equal"
+    ? `<p class="split-label">Split between</p><div class="chips">${state.friends.map((f, i) => `
+        <button type="button" class="chip who-chip" style="--friend:${f.color}" data-id="${f.id}" aria-pressed="${split.among.has(f.id)}">${esc(f.emoji)} ${esc(displayName(f, i))}</button>`).join("")}</div>`
+    : state.friends.map((f, i) => `
+        <label class="exact-row" style="--friend:${f.color}"><span>${esc(f.emoji)} ${esc(displayName(f, i))}</span>
+          <span class="money"><span aria-hidden="true">₹</span><input type="number" inputmode="decimal" min="0" step="any" data-id="${f.id}" value="${split.exact[f.id] ?? ""}" placeholder="0" aria-label="${esc(displayName(f, i))}'s share in rupees"></span></label>`).join("");
+  $$("#exAmong .who-chip").forEach((b) => b.addEventListener("click", () => {
+    split.among.has(b.dataset.id) ? split.among.delete(b.dataset.id) : split.among.add(b.dataset.id);
+    b.setAttribute("aria-pressed", String(split.among.has(b.dataset.id)));
+    checkSplit();
+  }));
+  $$("#exAmong input").forEach((inp) => inp.addEventListener("input", () => {
+    split.exact[inp.dataset.id] = inp.value === "" ? undefined : Number(inp.value);
+    checkSplit();
+  }));
+  checkSplit();
+  renderExpenses();
+  renderUpi();
+}
+
+// live hint under the form: each person's share, or what's left to assign
+function checkSplit() {
+  const amount = Number($("#exAmount").value) || 0;
+  const out = $("#exCheck");
+  if (split.mode === "equal") {
+    const n = split.among.size;
+    out.textContent = !n ? "Pick at least one person to split with."
+      : amount > 0 ? `${money(amount / n)} each for ${n} ${n === 1 ? "person" : "people"}.` : "";
+    return n > 0;
+  }
+  const assigned = Object.values(split.exact).reduce((a, b) => a + (Number(b) || 0), 0);
+  const left = amount - assigned;
+  out.textContent = !amount ? "Enter the bill amount, then each person's part."
+    : Math.abs(left) < 1 ? "Adds up exactly." : left > 0 ? `${money(left)} still to assign.` : `${money(-left)} more than the bill.`;
+  return amount > 0 && Math.abs(left) < 1;
+}
+
+function addExpense(e) {
+  e.preventDefault();
+  const amount = Math.round((Number($("#exAmount").value) || 0) * 100) / 100;
+  if (!(amount > 0)) { $("#exCheck").textContent = "Enter how much was paid."; $("#exAmount").focus(); return; }
+  if (!checkSplit()) { $("#exCheck").textContent ||= "Check the split."; return; }
+  const ex = {
+    id: `x${Date.now().toString(36)}`, what: $("#exWhat").value.trim() || $("#exWhat").placeholder.replace(/^What for\? e\.g\. /, ""),
+    amount, paidBy: $("#exPaidBy").value, mode: split.mode,
+    among: split.mode === "equal" ? [...split.among] : [],
+    exact: split.mode === "exact" ? Object.fromEntries(Object.entries(split.exact).filter(([, v]) => Number(v) > 0)) : {},
+  };
+  state.expenses = [...state.expenses, ex];
+  saveExpenses();
+  $("#exWhat").value = ""; $("#exAmount").value = ""; split.exact = {};
+  renderSplit();
+  toast(`Added: ${ex.what}, ${money(ex.amount)}`);
+}
+
+function renderExpenses() {
+  const list = $("#expenseList");
+  list.innerHTML = state.expenses.map((ex) => {
+    const sh = shares(ex), n = Object.keys(sh).length;
+    return `<li><div><b>${esc(ex.what)}</b><small>${esc(nameOf(ex.paidBy))} paid ${money(ex.amount)}, ${ex.mode === "equal" ? `split equally between ${n}` : "exact amounts"}</small></div>
+      <span class="amt">${money(ex.amount)}</span><button type="button" class="remove" data-id="${ex.id}" aria-label="Delete ${esc(ex.what)}">✕</button></li>`;
+  }).join("");
+  $$("#expenseList .remove").forEach((b) => b.addEventListener("click", () => {
+    state.expenses = state.expenses.filter((x) => x.id !== b.dataset.id);
+    saveExpenses(); renderSplit();
+  }));
+  const total = state.expenses.reduce((a, x) => a + x.amount, 0);
+  $("#splitHint").textContent = state.expenses.length ? `${money(total)} spent so far` : "";
+
+  const bal = balances(state.expenses), pays = settle(bal);
+  if (!state.expenses.length) { $("#settle").innerHTML = ""; return; }
+  const chips = Object.entries(bal).filter(([, v]) => Math.abs(v) >= 1).map(([id, v]) =>
+    `<span class="bal ${v > 0 ? "plus" : "minus"}">${esc(nameOf(id))} ${v > 0 ? "gets back" : "owes"} ${money(Math.abs(v))}</span>`).join("");
+  const rows = pays.map((p) => {
+    const to = friendById(p.to);
+    const upi = to?.upi && /^[\w.\-]{2,}@[a-zA-Z]{2,}$/.test(to.upi) ? upiLink(to.upi, displayName(to, state.friends.indexOf(to)), p.amount) : null;
+    return `<li><span>${esc(nameOf(p.from))}</span><span class="arrow" aria-hidden="true">pays</span><span>${esc(nameOf(p.to))}</span>
+      <b>${money(p.amount)}</b>${upi ? `<a class="pill" href="${esc(upi)}">Pay with UPI</a>` : ""}</li>`;
+  }).join("");
+  const summary = ["Midway bill split", ...state.expenses.map((x) => `${x.what}: ${money(x.amount)} (paid by ${nameOf(x.paidBy).replace(/^\S+ /, "")})`),
+    `Total: ${money(total)}`, "", ...(pays.length ? pays.map((p) => `${nameOf(p.from).replace(/^\S+ /, "")} pays ${nameOf(p.to).replace(/^\S+ /, "")} ${money(p.amount)}`) : ["Everyone is square."])].join("\n");
+  $("#settle").innerHTML = `
+    <h3>Who pays whom</h3>
+    ${pays.length ? `<ol class="settle-list">${rows}</ol>` : `<p class="fine">Everyone is square.</p>`}
+    <div class="bals">${chips}</div>
+    <div class="settle-actions">
+      <a class="btn btn-ghost btn-sm" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent(summary)}">Send on WhatsApp</a>
+      <button type="button" class="btn btn-ghost btn-sm" id="copySplit">Copy summary</button>
+      <button type="button" class="btn btn-ghost btn-sm" id="clearSplit">Start a new bill</button>
+    </div>`;
+  $("#copySplit").addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(summary); toast("Summary copied"); } catch { toast("Couldn't copy here. Use Send on WhatsApp instead."); }
+  });
+  $("#clearSplit").addEventListener("click", () => {
+    if (!state.expenses.length) return;
+    state.expenses = []; saveExpenses(); renderSplit(); toast("Bill cleared");
+  });
+}
+
+function renderUpi() {
+  const box = $("#upiList");
+  if (box.contains(document.activeElement)) return;               // don't redraw while someone types
+  box.innerHTML = state.friends.map((f, i) => `
+    <label class="exact-row" style="--friend:${f.color}"><span>${esc(f.emoji)} ${esc(displayName(f, i))}</span>
+      <input class="upi-in" data-id="${f.id}" value="${esc(f.upi || "")}" placeholder="name@okbank" autocomplete="off" aria-label="${esc(displayName(f, i))}'s UPI ID"></label>`).join("");
+  $$("#upiList .upi-in").forEach((inp) => inp.addEventListener("change", () => {
+    const f = friendById(inp.dataset.id); if (!f) return;
+    const v = inp.value.trim();
+    if (v && !/^[\w.\-]{2,}@[a-zA-Z]{2,}$/.test(v)) { toast("That doesn't look like a UPI ID (for example name@okaxis)."); return; }
+    f.upi = v; persistFriend(f); renderExpenses();
+  }));
+}
+
+function wireSplit() {
+  $("#splitForm").addEventListener("submit", addExpense);
+  $("#exAmount").addEventListener("input", checkSplit);
+  $$("#exMode button").forEach((b) => b.addEventListener("click", () => { split.mode = b.dataset.mode; renderSplit(); }));
 }
 
 /* ---------------- squads: start, join, share ---------------- */
@@ -600,7 +778,7 @@ function startDemo() {
   state.mode = "local";
   state.friends = [];
   DEMO_FRIENDS.forEach((d) => state.friends.push(newFriend({ name: d.name, emoji: d.emoji, place: `${d.place}, ${d.area}`, lat: d.lat, lon: d.lon })));
-  state.result = null; state.votes = {};
+  state.result = null; state.votes = {}; state.expenses = [];
   renderFriends(); paintFilters(); drawMap(); fitAll();
   $("#shareBtn").hidden = false;
   toast("Four sample friends across Ahmedabad. Press “Find our fair spot”.");
@@ -632,6 +810,8 @@ async function listenToRoom(joining = false) {
     const newResult = data.result && (!state.result || data.result.foundAt !== state.result.foundAt);
     if (data.result) state.result = data.result;
     state.votes = data.votes || {};
+    state.expenses = data.expenses || [];
+    if (!$("#stepSplit").contains(document.activeElement)) renderSplit(); else renderExpenses();
     if (first && joining && (!state.me || !friendById(state.me))) {
       const me = newFriend();
       state.me = me.id; store.set(`midway.me.${state.code}`, me.id);
@@ -688,6 +868,7 @@ function toast(msg) {
 function boot() {
   deck = makeDeck($("#deck"), { onVote, render: cardHtml });
   wireFilters();
+  wireSplit();
   $("#startBtn").addEventListener("click", startSquad);
   $("#demoBtn").addEventListener("click", startDemo);
   $("#addFriendBtn").addEventListener("click", () => {
@@ -732,6 +913,7 @@ function boot() {
         openPlanner();
         state.friends = saved.friends; state.filters = saved.filters || state.filters;
         state.result = store.get("midway.result"); state.votes = store.get("midway.votes") || {};
+        state.expenses = store.get("midway.expenses") || [];
         renderFriends(); paintFilters();
         if (state.result) showResults(); else { drawMap(); fitAll(); }
         $("#shareBtn").hidden = false;

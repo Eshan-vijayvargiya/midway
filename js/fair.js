@@ -79,13 +79,14 @@ export function rankSpots(spots, matrix) {
   return ranked.sort((a, b) => a.cost - b.cost);
 }
 
-// Rough budget band from the kind of place (OpenStreetMap rarely has prices): shown as an estimate.
-export function budgetBand(tags = {}) {
+// Rough cost per head in rupees from the kind of place. OpenStreetMap rarely has prices, so this is
+// shown as an estimate: quick bites ~₹200, cafés ~₹350, restaurants ~₹500, bars and fine dining ~₹1,100.
+export function estCost(tags = {}) {
   const a = tags.amenity, c = (tags.cuisine || "").toLowerCase();
-  if (["fast_food", "food_court", "ice_cream"].includes(a) || /street|chaat|snack|tea|juice/.test(c)) return 1;
-  if (a === "cafe") return 2;
-  if (["bar", "pub", "biergarten"].includes(a) || /fine_dining|steak|sushi|seafood/.test(c)) return 3;
-  return 2;
+  if (["bar", "pub", "biergarten"].includes(a) || /fine_dining|steak|sushi|seafood|italian|continental/.test(c)) return 1100;
+  if (["fast_food", "food_court", "ice_cream"].includes(a) || /street|chaat|snack|tea|juice|sandwich|burger|pizza/.test(c)) return 200;
+  if (a === "cafe") return 350;
+  return 500;
 }
 
 export function vibeOf(tags = {}) {

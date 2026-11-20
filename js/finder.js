@@ -1,6 +1,6 @@
 // The search: coarse grid -> finer grid -> places to eat -> time every trip -> rank.
-import { candidateGrid, centroid, gridAround, haversine, rankSpots, summarise, budgetBand, vibeOf, isVegFriendly } from "./fair.js?v=6";
-import { travelMatrix, placesNear, reverseGeocode } from "./services.js?v=6";
+import { candidateGrid, centroid, gridAround, haversine, rankSpots, summarise, estCost, vibeOf, isVegFriendly } from "./fair.js?v=7";
+import { travelMatrix, placesNear, reverseGeocode } from "./services.js?v=7";
 
 export const STEPS = [
   "Testing 49 possible meeting points",
@@ -60,7 +60,7 @@ export async function findFairSpot(friends, filters, onStep = () => {}, signal) 
     estimated ||= m3.estimated;
     venues = rankSpots(picked, m3.matrix).map((v) => ({
       id: v.id.replace("/", "_"), osm: v.id, name: v.name, lat: v.lat, lon: v.lon,
-      vibe: vibeOf(v.tags), budget: budgetBand(v.tags), veg: isVegFriendly(v.tags),
+      vibe: vibeOf(v.tags), cost: estCost(v.tags), veg: isVegFriendly(v.tags),
       cuisine: (v.tags.cuisine || "").split(";").filter(Boolean).slice(0, 2).map((c) => c.replace(/_/g, " ")),
       times: v.times.map((t) => Math.round(t)), balance: v.balance, max: Math.round(v.max),
       fromSpot: Math.round(haversine(v, spot)),
@@ -85,6 +85,6 @@ function pick(o, keys) {
 function filterPlaces(places, filters, spot) {
   return places
     .filter((p) => !filters.vibes?.length || filters.vibes.includes(vibeOf(p.tags)))
-    .filter((p) => !filters.budget || budgetBand(p.tags) <= filters.budget)
+    .filter((p) => !filters.budget || estCost(p.tags) <= filters.budget)          // budget = rupees per head
     .sort((a, b) => haversine(a, spot) - haversine(b, spot));
 }
