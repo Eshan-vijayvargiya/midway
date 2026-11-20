@@ -13,7 +13,7 @@ export const SERVICES = {
     foot: ["https://routing.openstreetmap.de/routed-foot"],
   },
   places: ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter"],
-  tiles: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+  tiles: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",    // light OSM tiles, turned dark with a CSS filter
 };
 
 export const MAX_FRIENDS = 8;

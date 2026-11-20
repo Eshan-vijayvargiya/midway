@@ -25,7 +25,7 @@ The plain midpoint on a map is rarely fair: roads, rivers and the shape of the c
    - The longest ride carries most of the weight: this is a *minimax* objective, so nobody gets stuck with the long trip.
    - The average breaks ties, so the app doesn't pick a spot that is equally far for everyone.
 3. **Sharpen.** A finer 5 × 5 grid around the best point gives a second matrix, and the better of the two wins.
-4. **Places to eat.** It finds named cafés and restaurants around the spot (OpenStreetMap via Overpass). If the area is quiet, the circle widens from 1.2 km to 2.5 km to 4.5 km. Then it times every friend to every place and ranks them by the same fairness cost.
+4. **Places to eat.** It finds named cafés and restaurants within 1.5 km of the spot (OpenStreetMap via Overpass), widening to 4.5 km if the area is quiet. It keeps the 45 nearest, times every friend to every place and ranks them by the same fairness cost.
 5. **Balance score.** Average ride ÷ longest ride, as a percentage. 100% means everyone travels exactly the same time.
 
 The maths lives in [`js/fair.js`](js/fair.js): Weiszfeld's geometric median, the candidate grids, the cost and balance functions. All of these are pure functions that are easy to test.
@@ -35,7 +35,7 @@ The maths lives in [`js/fair.js`](js/fair.js): Weiszfeld's geometric median, the
 | Part | Tool | Cost |
 |---|---|---|
 | Page | Plain HTML, CSS and JavaScript modules (no build step) | Free |
-| Map | Leaflet 1.9.4 + CARTO dark tiles | Free |
+| Map | Leaflet 1.9.4 + OpenStreetMap tiles, turned dark with a CSS filter | Free, no key |
 | Place search | Photon (by komoot), built on OpenStreetMap | Free, no key |
 | Travel times | OSRM table service (FOSSGIS servers, then the OSRM demo server) | Free, no key |
 | Places to eat | OpenStreetMap via the Overpass API | Free, no key |
@@ -114,4 +114,4 @@ midway/
 
 ## Credits
 
-Map data © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors (ODbL). Map tiles © [CARTO](https://carto.com/attributions). Search by [Photon](https://photon.komoot.io). Travel times by [OSRM](https://project-osrm.org), hosted by [FOSSGIS](https://routing.openstreetmap.de). Places via the [Overpass API](https://overpass-api.de).
+Map data and tiles © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors (ODbL). Search by [Photon](https://photon.komoot.io). Travel times by [OSRM](https://project-osrm.org), hosted by [FOSSGIS](https://routing.openstreetmap.de). Places via the [Overpass API](https://overpass-api.de).

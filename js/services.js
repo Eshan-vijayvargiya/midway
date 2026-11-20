@@ -3,17 +3,26 @@
 import { SERVICES } from "./config.js";
 import { haversine } from "./fair.js";
 
-async function getJSON(url, opts = {}, timeoutMs = 15000) {
+// signal = the person's Stop button; timeoutMs = give up on one slow server and try the next
+async function getJSON(url, opts = {}, timeoutMs = 15000, signal) {
+  if (signal?.aborted) throw new DOMException("Stopped", "AbortError");
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  const stop = () => ctrl.abort();
+  signal?.addEventListener("abort", stop);
   try {
     const r = await fetch(url, { ...opts, signal: ctrl.signal });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     return await r.json();
+  } catch (e) {
+    if (signal?.aborted) throw new DOMException("Stopped", "AbortError");
+    throw e;
   } finally {
     clearTimeout(t);
+    signal?.removeEventListener("abort", stop);
   }
 }
+const stopped = (e) => e?.name === "AbortError";
 
 function placeLabel(p) {
   const pr = p.properties || {};
@@ -35,29 +44,31 @@ export async function searchPlaces(q, near) {
   }));
 }
 
-export async function reverseGeocode(pt) {
+export async function reverseGeocode(pt, signal) {
   try {
-    const data = await getJSON(`${SERVICES.search}/reverse?lat=${pt.lat}&lon=${pt.lon}&lang=en`, {}, 8000);
+    const data = await getJSON(`${SERVICES.search}/reverse?lat=${pt.lat}&lon=${pt.lon}&lang=en`, {}, 8000, signal);
     const f = (data.features || [])[0];
     return f ? placeLabel(f) : { name: "My location", area: "" };
-  } catch {
+  } catch (e) {
+    if (stopped(e)) throw e;
     return { name: "My location", area: "" };
   }
 }
 
 // Minutes from each origin to each destination. mode: "car" (bike/auto/cab, by road) or "foot".
 // Returns { matrix, source } where source says whether real routing or an estimate was used.
-async function osrmTable(bases, origins, dests) {
+async function osrmTable(bases, origins, dests, signal) {
   const coords = [...origins, ...dests].map((p) => `${p.lon.toFixed(5)},${p.lat.toFixed(5)}`).join(";");
   const src = origins.map((_, i) => i).join(";");
   const dst = dests.map((_, j) => origins.length + j).join(";");
   let lastErr;
   for (const base of bases) {
     try {
-      const data = await getJSON(`${base}/table/v1/driving/${coords}?sources=${src}&destinations=${dst}&annotations=duration`, {}, 20000);
+      const data = await getJSON(`${base}/table/v1/driving/${coords}?sources=${src}&destinations=${dst}&annotations=duration`, {}, 15000, signal);
       if (data.code !== "Ok") throw new Error(data.code);
       return data.durations.map((row) => row.map((s) => (s == null ? null : s / 60)));
     } catch (e) {
+      if (stopped(e)) throw e;
       lastErr = e;
     }
   }
@@ -69,7 +80,7 @@ function estimateTable(origins, dests, mode) {
   return origins.map((o) => dests.map((d) => ((haversine(o, d) * 1.35) / 1000 / kmh) * 60));
 }
 
-export async function travelMatrix(friends, dests) {
+export async function travelMatrix(friends, dests, signal) {
   const rows = new Array(friends.length);
   let estimated = false;
   for (const mode of ["car", "foot"]) {
@@ -78,8 +89,9 @@ export async function travelMatrix(friends, dests) {
     const origins = idx.map((i) => friends[i]);
     let part;
     try {
-      part = await osrmTable(SERVICES.routing[mode], origins, dests);
-    } catch {
+      part = await osrmTable(SERVICES.routing[mode], origins, dests, signal);
+    } catch (e) {
+      if (stopped(e)) throw e;
       part = estimateTable(origins, dests, mode);
       estimated = true;
     }
@@ -89,14 +101,14 @@ export async function travelMatrix(friends, dests) {
 }
 
 // Named places to eat within radiusM metres of a point (OpenStreetMap via Overpass).
-export async function placesNear(pt, radiusM) {
-  const q = `[out:json][timeout:20];
+export async function placesNear(pt, radiusM, signal) {
+  const q = `[out:json][timeout:15];
 nwr(around:${Math.round(radiusM)},${pt.lat.toFixed(5)},${pt.lon.toFixed(5)})["amenity"~"^(restaurant|cafe|fast_food|ice_cream|food_court)$"]["name"];
-out center tags 120;`;
+out center tags 400;`;
   let lastErr;
   for (const base of SERVICES.places) {
     try {
-      const data = await getJSON(base, { method: "POST", body: new URLSearchParams({ data: q }) }, 25000);
+      const data = await getJSON(base, { method: "POST", body: new URLSearchParams({ data: q }) }, 18000, signal);
       return (data.elements || []).map((e) => ({
         id: `${e.type}/${e.id}`,
         name: e.tags.name,
@@ -105,8 +117,9 @@ out center tags 120;`;
         tags: e.tags,
       })).filter((p) => p.lat != null);
     } catch (e) {
+      if (stopped(e)) throw e;
       lastErr = e;
     }
   }
-  throw lastErr || new Error("places failed");
+  throw lastErr || new Error("PLACES_DOWN");
 }

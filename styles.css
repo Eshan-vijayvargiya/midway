@@ -147,6 +147,12 @@ h1, h2 { margin: 0; }
 
 .find-bar { position: sticky; bottom: -40px; padding: 4px 0 0; background: linear-gradient(to top, var(--night) 70%, transparent); }
 
+/* locked while searching, and the Stop button */
+.step.locked { opacity: .45; }
+.btn-primary.btn-stop { background: var(--slab); color: var(--chalk); box-shadow: inset 0 0 0 1.5px var(--coral); }
+.btn-primary.btn-stop:hover { box-shadow: inset 0 0 0 1.5px var(--coral), 0 0 30px -10px var(--coral); }
+.lock-note { color: var(--dim); font-size: 13px; margin-top: 4px; }
+
 /* progress */
 .progress { display: flex; flex-direction: column; gap: 10px; padding: 6px 0; }
 .progress p { margin: 0; display: flex; gap: 10px; align-items: center; color: var(--dim); }
@@ -217,6 +223,8 @@ h1, h2 { margin: 0; }
 
 /* map markers */
 .leaflet-container { font: inherit; background: #0e0e14; }
+/* OpenStreetMap's light tiles, turned into a night map (markers and routes sit in other panes, so they keep their colours) */
+.leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(.95) contrast(.9) saturate(.45); }
 #map.pinning, #map.pinning .leaflet-container { cursor: crosshair; }
 #map.pinning { box-shadow: inset 0 0 0 3px var(--lime); }
 .leaflet-control-attribution { background: rgba(8, 8, 12, .8) !important; color: #8e8aa8 !important; font-size: 11px; }

@@ -9,14 +9,14 @@ export const STEPS = [
   "Timing every trip to every place",
 ];
 
-export async function findFairSpot(friends, filters, onStep = () => {}) {
+export async function findFairSpot(friends, filters, onStep = () => {}, signal) {
   let estimated = false;
   const mid = centroid(friends);
 
   // 1 · coarse grid over the whole squad, plus the plain midpoint for comparison
   onStep(0);
   const coarse = candidateGrid(friends, 7);
-  const m1 = await travelMatrix(friends, [...coarse, mid]);
+  const m1 = await travelMatrix(friends, [...coarse, mid], signal);
   estimated ||= m1.estimated;
   const midTimes = m1.matrix.map((row) => row[coarse.length]);
   const rankedCoarse = rankSpots(coarse, m1.matrix.map((row) => row.slice(0, coarse.length)));
@@ -26,18 +26,16 @@ export async function findFairSpot(friends, filters, onStep = () => {}) {
   onStep(1);
   const cell = haversine(coarse[0], coarse[1]) || 800;
   const fine = gridAround(rankedCoarse[0], Math.max(cell * 0.6, 400), 5);
-  const m2 = await travelMatrix(friends, fine);
+  const m2 = await travelMatrix(friends, fine, signal);
   estimated ||= m2.estimated;
   const rankedFine = rankSpots(fine, m2.matrix);
   const spot = (rankedFine[0] && rankedFine[0].cost <= rankedCoarse[0].cost) ? rankedFine[0] : rankedCoarse[0];
 
   // 3 · places to eat near the spot, widening the circle if the area is quiet
   onStep(2);
-  let places = [];
-  for (const r of [1200, 2500, 4500]) {
-    places = await placesNear(spot, r);
-    if (filterPlaces(places, filters, spot).length >= 8) break;
-  }
+  // 1.5 km is plenty in a busy area; only a quiet area needs a second, wider request
+  let places = await placesNear(spot, 1500, signal);
+  if (filterPlaces(places, filters, spot).length < 8) places = await placesNear(spot, 4500, signal);
   let picked = filterPlaces(places, filters, spot);
   let relaxed = false;
   if (picked.length < 4 && places.length) {           // filters too strict here: keep their order, relax them
@@ -50,7 +48,7 @@ export async function findFairSpot(friends, filters, onStep = () => {}) {
   onStep(3);
   let venues = [];
   if (picked.length) {
-    const m3 = await travelMatrix(friends, picked);
+    const m3 = await travelMatrix(friends, picked, signal);
     estimated ||= m3.estimated;
     venues = rankSpots(picked, m3.matrix).map((v) => ({
       id: v.id.replace("/", "_"), osm: v.id, name: v.name, lat: v.lat, lon: v.lon,
@@ -63,7 +61,7 @@ export async function findFairSpot(friends, filters, onStep = () => {}) {
     venues = venues.slice(0, 12);
   }
 
-  const where = await reverseGeocode(spot);
+  const where = await reverseGeocode(spot, signal);
   return {
     spot: { lat: spot.lat, lon: spot.lon, name: where.name, area: where.area, times: spot.times.map((t) => Math.round(t)),
             ...pick(summarise(spot.times), ["max", "min", "mean", "balance"]) },
