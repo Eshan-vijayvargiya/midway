@@ -1,5 +1,5 @@
 // Squads: live rooms (Firebase) when configured, otherwise a squad link that carries the friends list.
-import { FIREBASE_CONFIG } from "./config.js?v=5";
+import { FIREBASE_CONFIG } from "./config.js?v=6";
 
 export const liveRooms = Boolean(FIREBASE_CONFIG);
 const FB = "https://www.gstatic.com/firebasejs/10.12.2";
