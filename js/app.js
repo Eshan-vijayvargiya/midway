@@ -1,12 +1,14 @@
 // Midway: the screen logic. State lives here; fair.js does the maths, finder.js runs the search.
-import { MAX_FRIENDS, SERVICES } from "./config.js?v=8";
-import { findFairSpot, STEPS } from "./finder.js?v=8";
-import { searchPlaces, reverseGeocode, routeLine } from "./services.js?v=8";
-import { makeDeck } from "./swipe.js?v=8";
-import { DEMO_FRIENDS } from "./demo.js?v=8";
-import * as room from "./room.js?v=8";
-import { shares, balances, settle, upiLink } from "./split.js?v=8";
-import { loadPhotos, photoFor, mapsPhotosUrl } from "./photos.js?v=8";
+import { MAX_FRIENDS, SERVICES } from "./config.js?v=9";
+import { findFairSpot, STEPS } from "./finder.js?v=9";
+import { searchPlaces, reverseGeocode, routeLine } from "./services.js?v=9";
+import { makeDeck } from "./swipe.js?v=9";
+import { DEMO_FRIENDS } from "./demo.js?v=9";
+import * as room from "./room.js?v=9";
+import { shares, balances, settle, upiLink } from "./split.js?v=9";
+import { loadPhotos, photoFor, mapsPhotosUrl } from "./photos.js?v=9";
+import { googleOn, loadRatings, ratingFor, trustedRating, shortCount, googleProblem } from "./ratings.js?v=9";
+import { rideTogether } from "./fair.js?v=9";
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -485,6 +487,10 @@ function showResults() {
   drawRoutes();
   renderSplit();
   loadPhotos(state.result.venues).then(paintPhotos);
+  if (googleOn) loadRatings(state.result).then((changed) => {
+    if (changed) { paintPhotos(); renderBoard(); paintDeckHint(); }
+    else if (googleProblem()) $("#routeNote").textContent += ` ${googleProblem()}`;
+  });
   requestAnimationFrame(() => $("#stepResults").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" }));
 }
 function renderResultsIfAny() { if (state.result && !$("#resultBody").hidden) { renderSpot(); renderBoard(); } }
@@ -521,7 +527,13 @@ function renderSpot() {
     : "Road travel times from OpenStreetMap, without traffic. Add 30–50% at rush hour. ")
     + (r.relaxed ? "Few places matched every filter here, so some filters were relaxed. " : "")
     + (r.placesDown ? `The free places servers didn't answer, so restaurants couldn't load this time. Press the button again in a minute. (${r.placesWhy || ""})` : "");
-  $("#deckHint").textContent = r.venues.length ? `${r.venues.length} places near the spot` : "";
+  paintDeckHint();
+}
+
+function paintDeckHint() {
+  const r = state.result; if (!r) return;
+  const rated = r.venues.filter((v) => ratingFor(v)?.rating).length;
+  $("#deckHint").textContent = !r.venues.length ? "" : rated ? `${r.venues.length} places, ${rated} rated on Google Maps` : `${r.venues.length} places near the spot`;
 }
 
 function voterId() { return state.mode === "live" ? state.me : LOCAL_VOTER; }
@@ -536,9 +548,14 @@ const distOf = (v) => (v.fromSpot < 1000 ? `${v.fromSpot} m` : `${(v.fromSpot / 
 
 // The photo strip: the place's own photo, a typical dish (both credited), or an illustration while loading / if none.
 function photoHtml(v) {
-  const p = photoFor(v);
   const tint = VIBE_TINT[v.vibe] || "var(--violet)";
   const art = `<span class="art-emoji" aria-hidden="true">${VIBE_EMOJI[v.vibe] || "🍽️"}</span>`;
+  const g = ratingFor(v)?.photo;
+  if (g) return `<div class="ph" data-venue="${esc(v.id)}" style="--tint:${tint}">
+      <img src="${esc(g.src)}" alt="Photo of ${esc(v.name)}" draggable="false" decoding="async" referrerpolicy="no-referrer-when-downgrade" onerror="this.parentNode.classList.add('art')">${art}
+      <p class="credit"><b>This place.</b> <a href="${esc(g.authorUrl)}" target="_blank" rel="noopener">Photo: ${esc(g.author)}, Google Maps</a></p>
+    </div>`;
+  const p = photoFor(v);
   if (!p) return `<div class="ph art${p === undefined ? " loading" : ""}" data-venue="${esc(v.id)}" style="--tint:${tint}">${art}</div>`;
   const label = p.kind === "place" ? `Photo of ${v.name}` : `A typical ${p.dish}`;
   return `<div class="ph" data-venue="${esc(v.id)}" style="--tint:${tint}">
@@ -553,13 +570,23 @@ function photoHtml(v) {
 function paintPhotos() {
   const byId = new Map((state.result?.venues || []).map((v) => [v.id, v]));
   $$(".ph[data-venue]").forEach((el) => { const v = byId.get(el.dataset.venue); if (v) el.outerHTML = photoHtml(v); });
+  $$(".tags[data-venue]").forEach((el) => { const v = byId.get(el.dataset.venue); if (v) el.innerHTML = tagsHtml(v); });
+}
+
+function starHtml(v) {
+  const g = ratingFor(v);
+  return g?.rating ? `<span class="tag star" title="Google Maps rating">★ ${g.rating.toFixed(1)} <small>${shortCount(g.count)} on Google</small></span>` : "";
+}
+
+function tagsHtml(v) {
+  const cost = v.cost || [0, 200, 400, 1100][v.budget || 2];                       // older saved results had a ₹ band
+  const tags = [starHtml(v), `<span class="tag">~₹${cost.toLocaleString("en-IN")} per head (est.)</span>`, `<span class="tag">${v.balance}% balanced</span>`];
+  if (v.veg) tags.push(`<span class="tag veg">🌱 Veg-friendly</span>`);
+  return tags.join("");
 }
 
 function cardHtml(v) {
   const fr = resultFriends();
-  const cost = v.cost || [0, 200, 400, 1100][v.budget || 2];                       // older saved results had a ₹ band
-  const tags = [`<span class="tag">~₹${cost.toLocaleString("en-IN")} per head (est.)</span>`, `<span class="tag">${v.balance}% balanced</span>`];
-  if (v.veg) tags.push(`<span class="tag veg">🌱 Veg-friendly</span>`);
   return `
     <div class="card-top">${photoHtml(v)}
       <a class="gm" href="${esc(mapsPhotosUrl(v))}" target="_blank" rel="noopener" aria-label="Photos and reviews of ${esc(v.name)} on Google Maps">📸 Photos on Maps</a>
@@ -567,7 +594,7 @@ function cardHtml(v) {
     <div class="card-body">
       <h3>${esc(v.name)}</h3>
       <p class="meta">${esc(whatOf(v))}. ${distOf(v)} from the fair spot</p>
-      <div class="tags">${tags.join("")}</div>
+      <div class="tags" data-venue="${esc(v.id)}">${tagsHtml(v)}</div>
       <div class="mini">${fr.map((f, i) => `<span style="--friend:${f.color}">${esc(f.emoji)} ${v.times[i]} min</span>`).join("")}</div>
     </div>`;
 }
@@ -593,7 +620,7 @@ function renderBoard(lastId) {
   $("#board").innerHTML = rows.length ? rows.slice(0, 6).map((r, k) => `
     <li class="${k === 0 ? "top" : ""}${r.v.id === state.pick ? " locked" : ""}" data-id="${r.v.id}">
       <span class="rank">${k + 1}</span>
-      <span class="nm">${esc(r.v.name)}<small>${r.v.id === state.pick ? "Locked in. " : ""}longest ride ${r.v.max} min, ${r.v.balance}% balanced</small></span>
+      <span class="nm">${esc(r.v.name)}<small>${r.v.id === state.pick ? "Locked in. " : ""}${ratingFor(r.v)?.rating ? `★ ${ratingFor(r.v).rating.toFixed(1)} on Google, ` : ""}longest ride ${r.v.max} min, ${r.v.balance}% balanced</small></span>
       <span class="votes" aria-label="${r.yes.length} yes votes">${r.yes.map((id) => esc(friendById(id)?.emoji || (id === LOCAL_VOTER ? "💖" : "🙂"))).join("")}</span>
       <div class="go">${r.v.id === state.pick ? "" : `<button type="button" class="pill lock-it" data-id="${r.v.id}">Lock in this place</button>`}${routeLinks(r.v)}</div>
     </li>`).join("")
@@ -605,8 +632,9 @@ function renderBoard(lastId) {
   }));
   $$("#board .lock-it").forEach((b) => b.addEventListener("click", () => lockPick(b.dataset.id)));
   const lockBtn = $("#lockBtn");
+  const best = suggestFromTie(rows);
   lockBtn.hidden = !rows.length || Boolean(pickedVenue());
-  if (rows.length) { lockBtn.textContent = `Lock in ${rows[0].v.name}`; lockBtn.dataset.id = rows[0].v.id; }
+  if (rows.length) { lockBtn.textContent = `Lock in ${best.v.name}`; lockBtn.dataset.id = best.v.id; }
   renderPick();
   if (lastId) drawMap(rows[0]?.v.id);
   if (!$("#stepSplit").hidden && !$("#exWhat").value) {
@@ -615,6 +643,49 @@ function renderBoard(lastId) {
   }
 }
 
+
+// Votes tied between places: suggest one. Best trusted Google rating first, then the fairest ride.
+function suggestFromTie(rows) {
+  const box = $("#tieNote");
+  const top = rows[0]?.yes.length || 0;
+  const tied = rows.filter((r) => r.yes.length === top);
+  if (tied.length < 2 || pickedVenue()) { box.hidden = true; return rows[0]; }
+  const rated = tied.filter((r) => trustedRating(ratingFor(r.v)) != null);
+  const fairest = (a, b) => a.v.max - b.v.max || b.v.balance - a.v.balance;
+  let best, why;
+  if (rated.length) {
+    best = [...rated].sort((a, b) => trustedRating(ratingFor(b.v)) - trustedRating(ratingFor(a.v)) || fairest(a, b))[0];
+    const g = ratingFor(best.v);
+    why = `the best rated of your picks (★ ${g.rating.toFixed(1)} from ${shortCount(g.count)} Google reviews), and nobody rides more than ${best.v.max} min.`;
+  } else {
+    best = [...tied].sort(fairest)[0];
+    why = `the fairest of your picks: nobody rides more than ${best.v.max} min (${best.v.balance}% balanced).`;
+  }
+  box.hidden = false;
+  box.innerHTML = `<p><b>${tied.length} places are tied on votes.</b> Midway suggests <b>${esc(best.v.name)}</b>, ${esc(why)}</p>`;
+  return best;
+}
+
+/* ---------------- squad tips: ride together, rush hour ---------------- */
+function renderTips() {
+  const box = $("#tips"), r = state.result;
+  if (!r || !box) return;
+  const fr = resultFriends(), dest = pickedVenue();
+  const toDest = dest ? dest.times : r.spot.times;
+  const where = dest ? dest.name : "the fair spot";
+  const between = r.between?.map((row) => row.t);
+  const nm = (i) => `${fr[i].emoji} ${displayName(fr[i], i)}`;
+  const tips = rideTogether(fr, toDest, between).map((c) => c.walk
+    ? `<b>${esc(nm(c.driver))} and ${esc(nm(c.rider))} can walk over together.</b> They live ${c.pickup} min apart on foot, and it adds ${c.extra ? `${c.extra} min` : "no time"} to ${esc(displayName(fr[c.driver], c.driver))}'s walk.`
+    : `<b>${esc(nm(c.driver))} can pick up ${esc(nm(c.rider))} on the way.</b> ${esc(displayName(fr[c.rider], c.rider))} is ${c.pickup} min away, and going together to ${esc(where)} adds ${c.extra ? `only ${c.extra} min` : "no time"} to ${esc(displayName(fr[c.driver], c.driver))}'s ride. One bike or cab instead of two: split the fare in “Split the bill”.`);
+  const now = new Date(), h = now.getHours() + now.getMinutes() / 60, weekday = now.getDay() >= 1 && now.getDay() <= 5;
+  if (weekday && ((h >= 8.5 && h < 11) || (h >= 17.5 && h < 21))) {
+    const longest = Math.max(...toDest.filter((t) => t != null));
+    tips.push(`<b>It's rush hour.</b> Rides can take 30–50% longer than shown, so leave about ${Math.max(5, Math.round(longest * 0.4 / 5) * 5)} min early.`);
+  }
+  box.hidden = !tips.length;
+  box.innerHTML = tips.length ? `<h3>Squad tips</h3><ul>${tips.map((t) => `<li>${t}</li>`).join("")}</ul>` : "";
+}
 
 // Google Maps directions from each friend to a place
 function routeLinks(v) {
@@ -638,6 +709,7 @@ function lockPick(id) {
 }
 
 function renderPick() {
+  renderTips();
   const v = pickedVenue(), box = $("#picked");
   box.hidden = !v;
   if (!v) { box.innerHTML = ""; return; }
@@ -859,7 +931,7 @@ function startDemo() {
   state.result = null; state.votes = {}; state.expenses = []; state.pick = null;
   renderFriends(); paintFilters(); drawMap(); fitAll();
   $("#shareBtn").hidden = false;
-  toast("Four sample friends across Ahmedabad. Press “Find our fair spot”.");
+  toast(`${DEMO_FRIENDS.length} sample friends across Ahmedabad. Press “Find our fair spot”.`);
 }
 
 async function joinRoom(code) {

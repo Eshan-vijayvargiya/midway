@@ -1,6 +1,6 @@
 // The search: coarse grid -> finer grid -> places to eat -> time every trip -> rank.
-import { candidateGrid, centroid, gridAround, haversine, rankSpots, summarise, estCost, vibeOf, isVegFriendly } from "./fair.js?v=8";
-import { travelMatrix, placesNear, reverseGeocode } from "./services.js?v=8";
+import { candidateGrid, centroid, gridAround, haversine, rankSpots, summarise, estCost, vibeOf, isVegFriendly } from "./fair.js?v=9";
+import { travelMatrix, placesNear, reverseGeocode } from "./services.js?v=9";
 
 export const STEPS = [
   "Testing 49 possible meeting points",
@@ -70,12 +70,17 @@ export async function findFairSpot(friends, filters, onStep = () => {}, signal) 
     venues = venues.slice(0, 12);
   }
 
+  // 5 · how far friends are from each other, for "ride together" tips
+  // (kept as a list of objects: Firestore can't store an array inside an array)
+  const mb = await travelMatrix(friends, friends, signal);
+  const between = mb.matrix.map((row) => ({ t: row.map((x) => (x == null ? null : Math.round(x))) }));
+
   const where = await reverseGeocode(spot, signal);
   return {
     spot: { lat: spot.lat, lon: spot.lon, name: where.name, area: where.area, times: spot.times.map((t) => Math.round(t)),
             ...pick(summarise(spot.times), ["max", "min", "mean", "balance"]) },
     midpoint: { lat: mid.lat, lon: mid.lon, times: midTimes.map((t) => (t == null ? null : Math.round(t))) },
-    venues, estimated, relaxed, placesDown, placesWhy, foundAt: Date.now(),
+    venues, between, estimated, relaxed, placesDown, placesWhy, foundAt: Date.now(),
   };
 }
 

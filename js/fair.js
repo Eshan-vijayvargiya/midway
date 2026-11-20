@@ -101,3 +101,30 @@ export function isVegFriendly(tags = {}) {
   const v = (tags["diet:vegetarian"] || "").toLowerCase(), c = (tags.cuisine || "").toLowerCase();
   return v === "yes" || v === "only" || /vegetarian|vegan|gujarati|south_indian|jain/.test(c);
 }
+
+// Who can ride together. Friend d picks up friend r on the way when:
+//   the extra time for d (d to r, then r to the place, minus d's own ride) is small, and r isn't far off.
+// toDest[i] = minutes from friend i to the place; between[i][j] = minutes from friend i to friend j.
+// Walkers who live close can walk over together. Each friend appears in at most one pair, best pairs first.
+export function rideTogether(friends, toDest, between) {
+  if (!between) return [];
+  const cands = [];
+  friends.forEach((d, i) => friends.forEach((r, j) => {
+    if (i === j || d.lat == null || r.lat == null) return;
+    const t = between[i]?.[j], td = toDest[i], tr = toDest[j];
+    if (t == null || td == null || tr == null) return;
+    const footD = d.mode === "foot", footR = r.mode === "foot";
+    if (footD !== footR) return;                           // a walker and a rider: no shared trip
+    const extra = Math.max(0, Math.round(t + tr - td));
+    const ok = footD ? t <= 10 && extra <= 8 : t <= 15 && extra <= Math.max(6, 0.35 * td);
+    if (ok) cands.push({ driver: i, rider: j, pickup: Math.round(t), extra, walk: footD });
+  }));
+  cands.sort((a, b) => a.extra - b.extra || a.pickup - b.pickup);
+  const used = new Set(), out = [];
+  for (const c of cands) {
+    if (used.has(c.driver) || used.has(c.rider)) continue;
+    used.add(c.driver); used.add(c.rider);
+    out.push(c);
+  }
+  return out;
+}

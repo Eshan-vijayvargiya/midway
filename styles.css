@@ -302,6 +302,19 @@ h1, h2 { margin: 0; }
 .board-list li.locked { border-color: var(--lime); box-shadow: 0 0 30px -14px var(--lime); }
 .board-list li.locked .rank { color: var(--lime); }
 #lockBtn { margin-top: 10px; }
+.card .tag.star { border-color: var(--yellow); color: var(--yellow); font-weight: 700; }
+.card .tag.star small { color: var(--dim); font-weight: 400; font-size: 12px; }
+
+/* suggestions: tied votes, squad tips */
+.tie-note { margin-top: 10px; padding: 12px 14px; border-radius: 16px; background: color-mix(in srgb, var(--yellow) 8%, var(--slab));
+  border: 1px solid color-mix(in srgb, var(--yellow) 45%, transparent); font-size: 14px; }
+.tie-note p { margin: 0; }
+.tie-note b { color: var(--chalk); }
+.tips { margin-top: 12px; padding: 14px 16px; border-radius: 18px; background: var(--slab); border: 1px solid var(--rule); }
+.tips h3 { margin: 0 0 8px; font: 600 15px/1.2 var(--display); color: var(--sky); }
+.tips ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.tips li { font-size: 14px; color: var(--dim); padding-left: 12px; box-shadow: inset 2px 0 0 var(--sky); }
+.tips li b { color: var(--chalk); font-weight: 600; }
 
 /* the place the squad locked in */
 .picked { margin-top: 14px; border-radius: 22px; overflow: hidden; background: var(--slab); border: 1px solid var(--lime);

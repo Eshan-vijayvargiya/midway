@@ -21,4 +21,10 @@ export const SERVICES = {
   tiles: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",    // light OSM tiles, turned dark with a CSS filter
 };
 
+// Restaurant ratings and real photos from Google (optional). OpenStreetMap has no ratings.
+// Paste a Google Maps API key here (see README, "Turn on Google ratings"). It is meant to be public:
+// what protects it is the website restriction and the daily cap you set in Google Cloud.
+// Leave it as null and Midway works without ratings.
+export const GOOGLE_MAPS_KEY = null;
+
 export const MAX_FRIENDS = 8;

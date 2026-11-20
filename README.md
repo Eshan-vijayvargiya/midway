@@ -14,6 +14,8 @@ Four friends live in four corners of the same city, at different colleges, and n
 - **See places to eat around it.** Cafés, quick bites, sit-down places and dessert from OpenStreetMap, filtered by vibe, veg-friendly and a **budget per head** slider (₹150 to no limit).
 - **Swipe to vote.** Tinder-style cards show a photo and each friend's travel time to each place. The squad's favourites rise to the top.
 - **Photos on every card.** If OpenStreetMap links a photo of the place itself, the card shows it. Otherwise it shows a typical dish for that kind of place (a dosa for a South Indian place, chai for a tea stall), taken from the dish's Wikipedia article. Every photo is free-licensed and credited with its author and licence. **Photos on Maps** opens the real place in Google Maps.
+- **Ratings (optional).** With a Google Maps key, each card shows the place's ★ rating, its number of Google reviews, and a real photo of the place.
+- **Suggestions.** When votes are tied between places, Midway suggests the best rated one, using a review-weighted rating so 4.8 from 6 reviews doesn't beat 4.5 from 3,000. Without ratings, it suggests the fairest ride. **Squad tips** spot friends who live close: "Riya can pick up Zoya on the way, it adds only 4 min". At rush hour, they also say how early to leave.
 - **Lock it in.** When the votes are in, lock in the winner. The place gets a star on the map, and every friend gets a Google Maps route to it.
 - **Split the bill.** Once a place is locked in, a Splitwise-style section opens. Add each expense (who paid, how much) and split it equally or by exact amounts. Midway then works out **who pays whom in the fewest payments**. Add UPI IDs and each payment becomes a one-tap "Pay with UPI" button. You can also send the summary to the group on WhatsApp.
 - **One link for the whole squad.** Share it on WhatsApp. In a live room, everyone adds their own spot from their own phone and votes update live. Spots are rounded to about 100 m before they are shared.
@@ -44,6 +46,7 @@ The maths lives in [`js/fair.js`](js/fair.js): Weiszfeld's geometric median, the
 | Travel times and routes | OSRM table and route services (FOSSGIS servers, then the OSRM demo server) | Free, no key |
 | Places to eat | OpenStreetMap via the Overpass API, with Photon and Nominatim as backups | Free, no key |
 | Photos | Wikimedia Commons, through the Wikipedia and Wikidata APIs | Free, no key |
+| Ratings and place photos (optional) | Google Places API (New), through the Maps JavaScript API | 1,000 free lookups a month; needs a key |
 | Live rooms (optional) | Google Firebase Cloud Firestore | Free plan |
 | Hosting | GitHub Pages | Free |
 
@@ -58,7 +61,7 @@ cd midway
 python -m http.server 8000
 ```
 
-Then open http://localhost:8000. Click **Try it with sample friends** for four friends across Ahmedabad.
+Then open http://localhost:8000. Click **Try it with sample friends** for five friends across Ahmedabad (Zoya lives near Riya, so you'll also see a ride-together tip).
 
 ## Publish it (GitHub Pages)
 
@@ -78,6 +81,22 @@ Without this step, Midway still works: one person can add everyone, or share a s
 6. Optional: in Firestore, open **TTL policies**, set the collection group to `rooms` and the field to `expires`. Rooms then delete themselves after a week.
 
 The Firebase web config is meant to be public: what protects the data is the rules file. Rooms can only be opened with their 6-character code, cannot be listed or deleted, and hold at most 8 friends.
+
+## Turn on Google ratings (optional, about 10 minutes)
+
+OpenStreetMap has no ratings, so these come from Google. Without a key, Midway works the same, just without stars.
+
+1. Go to [console.cloud.google.com](https://console.cloud.google.com) and create a project called `midway`. Google asks for a billing account with a card. Places has **1,000 free rating lookups a month**; step 4 makes sure you never go past that.
+2. Open **APIs & Services → Library** and enable **Maps JavaScript API** and **Places API (New)**.
+3. Open **APIs & Services → Credentials → Create credentials → API key**. Edit the key:
+   - **Application restrictions → Websites**: add `https://<your-username>.github.io/*` and `http://localhost:8000/*`.
+   - **API restrictions → Restrict key**: tick **Maps JavaScript API** and **Places API (New)**. Save.
+4. Cap it. Open **Places API (New) → Quotas & system limits** and set the per-day limits for nearby search and place photos to **30**. Under **Billing → Budgets & alerts**, add a ₹100 budget with an email alert.
+5. Paste the key into [`js/config.js`](js/config.js) in place of `null` (in quotes), then push.
+
+**Is it safe to have this key in a public repo?** Yes, if you did steps 3 and 4. A Maps JavaScript key always ends up in the browser, so Google expects it to be visible. The website restriction stops other sites from using it, and the daily cap limits how much it can be used.
+
+How it works: after each search, Midway makes **one** Nearby Search around the fair spot (two if the first finds few matches). It matches Google's places to its OpenStreetMap places by name and distance: "La Pino'z" and "La Pino'z Pizza - Navrangpura" 40 m apart count as the same place. Ratings stay in memory for that visit and are never saved, because Google's terms don't allow storing them. Ratings appear only on the cards and the board, never on the OpenStreetMap map.
 
 ## Privacy
 
@@ -106,6 +125,7 @@ midway/
 │   ├── room.js         live rooms (Firebase) and squad links
 │   ├── swipe.js        the swipe deck
 │   ├── photos.js       card photos: the place's own photo or a typical dish, with credits
+│   ├── ratings.js      Google ratings (optional): one lookup, name + distance matching, review-weighted rating
 │   ├── split.js        the bill split: shares, balances, fewest-payments settle-up, UPI links
 │   ├── demo.js         the Ahmedabad sample squad
 │   └── config.js       Firebase config and service addresses
@@ -117,10 +137,12 @@ midway/
 
 - **The problem:** "fair" is not the map midpoint. I measured fairness in travel time and turned the choice into an optimisation: minimise the longest trip (minimax), with the average as a tie-breaker.
 - **The method:** a coarse-to-fine grid search over travel-time matrices. That takes 3 routing requests instead of hundreds, so it stays inside free API limits.
+- **Ratings:** a Bayesian average, (n × rating + 30 × 4.0) ÷ (n + 30), so a place with few reviews can't win on luck. Entity matching joins Google and OpenStreetMap places on name similarity plus distance.
+- **Ride together:** for every pair of friends, extra time = (driver to rider) + (rider to place) − (driver's own ride). Midway suggests the pairs where that is small, each friend in at most one pair.
 - **Settle-up:** a greedy algorithm (largest debtor pays largest creditor) settles any bill in at most *people − 1* payments.
 - **Engineering:** each free service has a fallback (cards fall back from the place's photo, to a dish photo, to an illustration); rooms sync live through Firestore; spots are rounded for privacy; the site is static and costs nothing to host.
 - **What I would add next:** metro and bus times, opening hours, and a "rush hour" switch using historical traffic.
 
 ## Credits
 
-Map data and tiles © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors (ODbL). Search by [Photon](https://photon.komoot.io). Travel times by [OSRM](https://project-osrm.org), hosted by [FOSSGIS](https://routing.openstreetmap.de). Places via the [Overpass API](https://overpass-api.de). Photos from [Wikimedia Commons](https://commons.wikimedia.org), credited on each card with the author and licence.
+Map data and tiles © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors (ODbL). Search by [Photon](https://photon.komoot.io). Travel times by [OSRM](https://project-osrm.org), hosted by [FOSSGIS](https://routing.openstreetmap.de). Places via the [Overpass API](https://overpass-api.de). Photos from [Wikimedia Commons](https://commons.wikimedia.org), credited on each card with the author and licence. Ratings and place photos (when a key is set) from Google Maps.

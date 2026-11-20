@@ -13,7 +13,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,700&family=Unbounded:wght@600;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
-<link rel="stylesheet" href="styles.css?v=8">
+<link rel="stylesheet" href="styles.css?v=9">
 </head>
 <body>
 
@@ -117,6 +117,7 @@
           <ul class="ride-bars" id="rideBars"></ul>
           <p class="fine" id="routeNote"></p>
         </div>
+        <div class="tips" id="tips" hidden></div>
 
         <div class="deck-wrap">
           <div class="step-head"><h2>Swipe on where to eat</h2><span class="hint" id="deckHint"></span></div>
@@ -130,6 +131,7 @@
         <div class="board">
           <div class="step-head"><h2>Squad picks</h2><span class="hint" id="boardHint"></span></div>
           <ol class="board-list" id="board"></ol>
+          <div class="tie-note" id="tieNote" hidden aria-live="polite"></div>
           <button class="btn btn-primary btn-wide" id="lockBtn" hidden>Lock it in</button>
         </div>
 
@@ -187,6 +189,6 @@
 <div class="toast" id="toast" role="status" hidden></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
-<script type="module" src="js/app.js?v=8"></script>
+<script type="module" src="js/app.js?v=9"></script>
 </body>
 </html>
