@@ -1,0 +1,84 @@
+// The search: coarse grid -> finer grid -> places to eat -> time every trip -> rank.
+import { candidateGrid, centroid, gridAround, haversine, rankSpots, summarise, budgetBand, vibeOf, isVegFriendly } from "./fair.js";
+import { travelMatrix, placesNear, reverseGeocode } from "./services.js";
+
+export const STEPS = [
+  "Testing 49 possible meeting points",
+  "Sharpening the best area",
+  "Finding places to eat around it",
+  "Timing every trip to every place",
+];
+
+export async function findFairSpot(friends, filters, onStep = () => {}) {
+  let estimated = false;
+  const mid = centroid(friends);
+
+  // 1 · coarse grid over the whole squad, plus the plain midpoint for comparison
+  onStep(0);
+  const coarse = candidateGrid(friends, 7);
+  const m1 = await travelMatrix(friends, [...coarse, mid]);
+  estimated ||= m1.estimated;
+  const midTimes = m1.matrix.map((row) => row[coarse.length]);
+  const rankedCoarse = rankSpots(coarse, m1.matrix.map((row) => row.slice(0, coarse.length)));
+  if (!rankedCoarse.length) throw new Error("NO_ROUTES");
+
+  // 2 · finer grid around the best coarse point (half a cell either side)
+  onStep(1);
+  const cell = haversine(coarse[0], coarse[1]) || 800;
+  const fine = gridAround(rankedCoarse[0], Math.max(cell * 0.6, 400), 5);
+  const m2 = await travelMatrix(friends, fine);
+  estimated ||= m2.estimated;
+  const rankedFine = rankSpots(fine, m2.matrix);
+  const spot = (rankedFine[0] && rankedFine[0].cost <= rankedCoarse[0].cost) ? rankedFine[0] : rankedCoarse[0];
+
+  // 3 · places to eat near the spot, widening the circle if the area is quiet
+  onStep(2);
+  let places = [];
+  for (const r of [1200, 2500, 4500]) {
+    places = await placesNear(spot, r);
+    if (filterPlaces(places, filters, spot).length >= 8) break;
+  }
+  let picked = filterPlaces(places, filters, spot);
+  let relaxed = false;
+  if (picked.length < 4 && places.length) {           // filters too strict here: keep their order, relax them
+    picked = filterPlaces(places, { ...filters, vibes: [], budget: 0 }, spot);
+    relaxed = true;
+  }
+  picked = picked.slice(0, 45);
+
+  // 4 · time every friend to every place, rank by fairness
+  onStep(3);
+  let venues = [];
+  if (picked.length) {
+    const m3 = await travelMatrix(friends, picked);
+    estimated ||= m3.estimated;
+    venues = rankSpots(picked, m3.matrix).map((v) => ({
+      id: v.id.replace("/", "_"), osm: v.id, name: v.name, lat: v.lat, lon: v.lon,
+      vibe: vibeOf(v.tags), budget: budgetBand(v.tags), veg: isVegFriendly(v.tags),
+      cuisine: (v.tags.cuisine || "").split(";").filter(Boolean).slice(0, 2).map((c) => c.replace(/_/g, " ")),
+      times: v.times.map((t) => Math.round(t)), balance: v.balance, max: Math.round(v.max),
+      fromSpot: Math.round(haversine(v, spot)),
+    }));
+    if (filters.veg) venues.sort((a, b) => Number(b.veg) - Number(a.veg));   // stable: fairness order inside each group
+    venues = venues.slice(0, 12);
+  }
+
+  const where = await reverseGeocode(spot);
+  return {
+    spot: { lat: spot.lat, lon: spot.lon, name: where.name, area: where.area, times: spot.times.map((t) => Math.round(t)),
+            ...pick(summarise(spot.times), ["max", "min", "mean", "balance"]) },
+    midpoint: { lat: mid.lat, lon: mid.lon, times: midTimes.map((t) => (t == null ? null : Math.round(t))) },
+    venues, estimated, relaxed, foundAt: Date.now(),
+  };
+}
+
+function pick(o, keys) {
+  return Object.fromEntries(keys.map((k) => [k, typeof o[k] === "number" ? Math.round(o[k]) : o[k]]));
+}
+
+function filterPlaces(places, filters, spot) {
+  return places
+    .filter((p) => !filters.vibes?.length || filters.vibes.includes(vibeOf(p.tags)))
+    .filter((p) => !filters.budget || budgetBand(p.tags) <= filters.budget)
+    .sort((a, b) => haversine(a, spot) - haversine(b, spot));
+}

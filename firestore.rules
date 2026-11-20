@@ -1,0 +1,18 @@
+rules_version = '2';
+// Midway squad rooms: anyone with the 6-character room code can read and update that room.
+// No accounts, no listing of rooms, no deleting, and only the fields the app uses.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /rooms/{room} {
+      function shapeOk() {
+        return request.resource.data.keys().hasOnly(['created', 'expires', 'friends', 'filters', 'result', 'votes'])
+          && request.resource.data.friends is map
+          && request.resource.data.friends.size() <= 8;
+      }
+      allow get: if room.matches('^[A-Z2-9]{6}$');
+      allow list: if false;
+      allow create, update: if room.matches('^[A-Z2-9]{6}$') && shapeOk();
+      allow delete: if false;
+    }
+  }
+}

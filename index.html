@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Midway: find the fair spot to meet</title>
+<meta name="description" content="Friends spread across the city? Midway finds the meeting spot where nobody gets stuck with the long ride, then lets the squad swipe on where to eat.">
+<meta name="theme-color" content="#08080c">
+<meta property="og:title" content="Midway: find the fair spot to meet">
+<meta property="og:description" content="Add where everyone is coming from. Midway finds the fairest spot and the places to eat around it.">
+<link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,700&family=Unbounded:wght@600;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="top">
+  <a class="brand" href="./" aria-label="Midway home">
+    <svg class="brand-mark" viewBox="0 0 40 40" aria-hidden="true">
+      <circle cx="8" cy="10" r="4" fill="var(--pink)"/><circle cx="32" cy="10" r="4" fill="var(--sky)"/>
+      <circle cx="8" cy="32" r="4" fill="var(--orange)"/><circle cx="32" cy="32" r="4" fill="var(--violet)"/>
+      <path d="M8 10 20 20M32 10 20 20M8 32 20 20M32 32 20 20" stroke="var(--chalk)" stroke-width="1.6" stroke-dasharray="2 3" fill="none"/>
+      <circle cx="20" cy="20" r="5.5" fill="var(--lime)"/>
+    </svg>
+    <span>midway</span>
+  </a>
+  <div class="top-actions">
+    <span class="room-chip" id="roomChip" hidden></span>
+    <button class="btn btn-ghost btn-sm" id="shareBtn" hidden>Invite the squad</button>
+  </div>
+</header>
+
+<!-- landing -->
+<main id="landing" class="landing">
+  <section class="hero">
+    <div class="hero-copy">
+      <h1 class="hero-title"><span>four friends.</span><span>four corners.</span><span>one fair spot.</span></h1>
+      <p class="hero-lede">Add where everyone is coming from. Midway finds the spot where nobody gets stuck with the long ride, then the squad swipes on where to eat.</p>
+      <div class="hero-cta">
+        <button class="btn btn-primary" id="startBtn">Start a squad</button>
+        <button class="btn btn-ghost" id="demoBtn">Try it with sample friends</button>
+      </div>
+      <p class="hero-note" id="joinNote" hidden></p>
+    </div>
+    <div class="hero-art" aria-hidden="true">
+      <svg viewBox="0 0 400 400" class="converge">
+        <g class="streets">
+          <path d="M0 120H400M0 280H400M120 0V400M280 0V400M0 0 400 400" />
+        </g>
+        <path class="route r1" d="M56 64 C120 110 150 160 200 200"/>
+        <path class="route r2" d="M344 58 C300 120 260 150 200 200"/>
+        <path class="route r3" d="M60 340 C110 300 150 240 200 200"/>
+        <path class="route r4" d="M348 336 C290 290 250 250 200 200"/>
+        <g class="pin"><circle cx="200" cy="200" r="34" class="pin-glow"/><circle cx="200" cy="200" r="16" class="pin-dot"/></g>
+      </svg>
+      <span class="sticker s1">🦊</span><span class="sticker s2">🐸</span>
+      <span class="sticker s3">🐼</span><span class="sticker s4">🦄</span>
+      <p class="hero-art-caption">longest ride: <b>22 min</b> instead of <b>41</b></p>
+    </div>
+  </section>
+  <section class="how">
+    <div><h2>Add the squad</h2><p>Everyone drops their spot, from their own phone or yours. Spots are rounded to about 100 m, so nobody shares their exact door.</p></div>
+    <div><h2>Get the fair spot</h2><p>Midway times real road trips to dozens of possible meeting points and picks the one where the longest ride is shortest.</p></div>
+    <div><h2>Swipe on food</h2><p>Cafés, quick bites and sit-down places near the spot, filtered by vibe, veg and budget. The squad swipes, the top pick wins.</p></div>
+  </section>
+  <footer class="foot">Map data from OpenStreetMap contributors. Map tiles by CARTO, travel times by OSRM, search by Photon.</footer>
+</main>
+
+<!-- planner -->
+<main id="planner" class="planner" hidden>
+  <aside class="panel" id="panel">
+
+    <section class="step" id="stepSquad" aria-labelledby="hSquad">
+      <div class="step-head"><h2 id="hSquad">Who's coming</h2><span class="hint" id="squadHint">Add at least 2 friends</span></div>
+      <ol class="friends" id="friendList"></ol>
+      <button class="btn btn-dashed" id="addFriendBtn">Add a friend</button>
+    </section>
+
+    <section class="step" id="stepVibe" aria-labelledby="hVibe">
+      <div class="step-head"><h2 id="hVibe">What's the vibe</h2></div>
+      <div class="chips" role="group" aria-label="Kind of place">
+        <button class="chip" data-vibe="cafe" aria-pressed="false">☕ Café</button>
+        <button class="chip" data-vibe="quick" aria-pressed="false">🍔 Quick bites</button>
+        <button class="chip" data-vibe="restaurant" aria-pressed="false">🍽️ Sit-down</button>
+        <button class="chip" data-vibe="dessert" aria-pressed="false">🍨 Dessert</button>
+      </div>
+      <div class="row-split">
+        <button class="toggle" id="vegToggle" aria-pressed="false"><span class="knob"></span>🌱 Veg-friendly first</button>
+        <div class="seg" role="group" aria-label="Budget per head (approx.)">
+          <button data-budget="0" aria-pressed="true">Any</button>
+          <button data-budget="1" aria-pressed="false">₹</button>
+          <button data-budget="2" aria-pressed="false">₹₹</button>
+          <button data-budget="3" aria-pressed="false">₹₹₹</button>
+        </div>
+      </div>
+      <p class="fine">Budget is a guess from the type of place: street food and quick bites ₹, cafés and most restaurants ₹₹, bars and fine dining ₹₹₹.</p>
+    </section>
+
+    <div class="find-bar">
+      <button class="btn btn-primary btn-wide" id="findBtn" disabled>Find our fair spot</button>
+    </div>
+
+    <section class="step results" id="stepResults" hidden aria-live="polite">
+      <div id="progress" class="progress" hidden></div>
+      <div id="resultBody" hidden>
+        <div class="spot-card">
+          <p class="spot-kicker">Your fair spot</p>
+          <h2 class="spot-name" id="spotName">…</h2>
+          <p class="spot-area" id="spotArea"></p>
+          <div class="balance">
+            <div class="balance-num"><span id="balanceNum">0</span><small>% balanced</small></div>
+            <p class="balance-text" id="balanceText"></p>
+          </div>
+          <ul class="ride-bars" id="rideBars"></ul>
+          <p class="fine" id="routeNote"></p>
+        </div>
+
+        <div class="deck-wrap">
+          <div class="step-head"><h2>Swipe on where to eat</h2><span class="hint" id="deckHint"></span></div>
+          <div class="deck" id="deck" tabindex="0" aria-label="Places to eat. Use the left and right arrow keys to vote."></div>
+          <div class="deck-buttons">
+            <button class="btn btn-nah" id="nahBtn">Nah</button>
+            <button class="btn btn-in" id="inBtn">I'm in</button>
+          </div>
+        </div>
+
+        <div class="board">
+          <div class="step-head"><h2>Squad picks</h2><span class="hint" id="boardHint"></span></div>
+          <ol class="board-list" id="board"></ol>
+        </div>
+      </div>
+    </section>
+  </aside>
+
+  <section class="map-wrap" aria-label="Map">
+    <div id="map"></div>
+  </section>
+</main>
+
+<dialog id="shareDialog" class="sheet">
+  <form method="dialog">
+    <h2>Invite the squad</h2>
+    <p id="shareText"></p>
+    <input id="shareUrl" readonly aria-label="Squad link">
+    <div class="sheet-actions">
+      <a class="btn btn-primary" id="waBtn" target="_blank" rel="noopener">Send on WhatsApp</a>
+      <button class="btn btn-ghost" id="copyBtn" type="button">Copy link</button>
+      <button class="btn btn-ghost" value="close">Done</button>
+    </div>
+  </form>
+</dialog>
+
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
